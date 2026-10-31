@@ -254,6 +254,28 @@ class AddDeviceEvent(SigchainEvent):
         expires: int | None = None,
     ) -> AddDeviceEvent:
         """Create and sign an add device event."""
+        return cls.create_for(
+            master_keypair,
+            device_keypair.verify_key.to_hex(),
+            device_keypair.public_encryption_key.to_hex(),
+            label,
+            prev_hash,
+            capabilities,
+            expires,
+        )
+
+    @classmethod
+    def create_for(
+        cls,
+        master_keypair: KeyPair,
+        device_pubkey: str,
+        device_encryption_pubkey: str,
+        label: str,
+        prev_hash: str,
+        capabilities: list[DeviceCapability] | None = None,
+        expires: int | None = None,
+    ) -> AddDeviceEvent:
+        """Create and sign an add device event for a device whose public keys we were given (it keeps its private keys)."""
         caps = [c.value for c in capabilities] if capabilities else [c.value for c in DeviceCapability]
         event = cls(
             type=EventType.ADD_DEVICE,
@@ -261,8 +283,8 @@ class AddDeviceEvent(SigchainEvent):
             prev=prev_hash,
             signature="",
             signed_by=master_keypair.verify_key.to_hex(),
-            device_pubkey=device_keypair.verify_key.to_hex(),
-            device_encryption_pubkey=device_keypair.public_encryption_key.to_hex(),
+            device_pubkey=device_pubkey,
+            device_encryption_pubkey=device_encryption_pubkey,
             label=label,
             capabilities=caps,
             expires=expires,
@@ -1127,6 +1149,24 @@ class Identity:
         )
         self.sigchain.append(event)
         return device_keypair, event
+
+    def authorize_device(
+        self,
+        device_pubkey: str,
+        device_encryption_pubkey: str,
+        label: str,
+        capabilities: list[DeviceCapability] | None = None,
+        expires: int | None = None,
+    ) -> AddDeviceEvent:
+        """Authorize a device that generated its own keys (pairing): only its public keys are needed."""
+        if not self.local_keypair:
+            raise ValueError("Cannot add device: no local keypair")
+        event = AddDeviceEvent.create_for(
+            self.local_keypair, device_pubkey, device_encryption_pubkey, label, self.sigchain.head_hash,
+            capabilities, expires,
+        )
+        self.sigchain.append(event)
+        return event
 
     def revoke_device(self, device_pubkey: str, reason: str | None = None) -> RevokeDeviceEvent:
         """Revoke a device key."""

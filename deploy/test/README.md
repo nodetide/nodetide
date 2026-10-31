@@ -117,6 +117,47 @@ It talks to the verification service at `nt-verifier.<domain>` (override with `-
 `.local-wallet/` (git-ignored); the password is generated once and printed. Use the local wallet's identity for
 sign-ins instead of the one on the server (the server's wallet service can simply stay unused).
 
+On a Mac the script sets `WALLET_KEY_STORE=keychain`: `wallet.json` is then encrypted, and the key lives in the login
+Keychain (service `nodetide-test-wallet`), so the private keys, claim values and attestations are never on disk in
+clear. An existing plain `wallet.json` is encrypted on the next start. Losing the Keychain item makes the file
+unreadable (the wallet stops instead of starting empty), so the identity is gone with it: this is a test wallet.
+
+### As a macOS menu-bar app
+
+`macos-app/build.sh` builds `Nodetide Wallet.app` (PyInstaller: Python and every dependency inside, no install needed on
+the Mac that builds it for itself). It shows a 🪪 in the menu bar with **Open wallet**, **Change node…**, **Show data
+folder** and **Quit**. On first start it asks for the node address (`https://nt-node.<domain>`; the verifier address is
+derived as in `local-wallet.sh`). **Open wallet** opens the browser through a one-time link, so no password is typed.
+
+- State is in `~/Library/Application Support/Nodetide Wallet/` and is encrypted with a key in the login Keychain; the
+  generated HTTP password is in the Keychain too (service `nodetide-test-wallet-app`).
+- It is only ad-hoc signed: another Mac shows a Gatekeeper warning (right-click, Open), and after a rebuild macOS may
+  ask again for Keychain access.
+- **Same identity on several devices.** On its first start the app asks whether this is your first wallet. Choose
+  *Pair with my existing wallet* and the browser shows a code like `ABCDE-FGHJK`. In the wallet that holds your master
+  key (the web one) open **Devices**, enter the code, compare the key fingerprint and add the device. The app then has
+  the same identity, claims and attestations, adds claims as its own device and never holds the master key.
+  (Details below.)
+
+### Several devices, one identity (pairing)
+
+An identity is its sigchain on the node; the wallet that holds the master key can authorize more devices on it, and a
+device may add claims (the `manage_claims` capability) without ever holding the master key.
+
+1. The new wallet makes its own device keys, shows a code (10 characters, about 49 bits) and publishes only its **public**
+   keys in a slot named by the *hash* of the code (`POST /api/pairing` on the node, kept in memory for ten minutes).
+2. You type the code into **Devices** on the wallet that holds the master key. It shows the new device's label and key
+   fingerprint (the same one the new device displays); on confirming it appends an `add_device` event to the chain,
+   publishes it, and leaves the claim values and attestations in the slot, sealed (NaCl box) to the new device's key.
+3. The new wallet opens the answer and checks it before using it: the chain verifies, it lists this very device with
+   `manage_claims`, the sender's key belongs to a device of the chain, and every claim value matches the commitment on the
+   chain. Then it deletes the slot.
+
+The node relays two small messages and can read neither the code nor the answer. This is a **one-time copy**: claims added
+later on one device are not sent to the other (their commitments reach every device through the chain, the values do not).
+Only the wallet with the master key can add devices; revoking devices and syncing values are not built yet.
+To start over, *Start a new identity instead* on the pairing page makes a separate identity.
+
 ## Grafana as a guinea pig
 
 `nt-grafana.<domain>` is stock Grafana configured with its generic OAuth provider, the way any real application

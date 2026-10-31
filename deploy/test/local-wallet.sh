@@ -29,6 +29,11 @@ if [ ! -d "$STATE/venv" ]; then
     python3 -m venv "$STATE/venv"
     "$STATE/venv/bin/pip" install -q "$ROOT/python"
 fi
+# On a Mac the wallet's state file is encrypted with a key held in the Keychain.
+if [ "$(uname)" = Darwin ]; then
+    "$STATE/venv/bin/python" -c 'import keyring' 2>/dev/null || "$STATE/venv/bin/pip" install -q keyring
+    export WALLET_KEY_STORE=keychain
+fi
 if [ ! -f "$STATE/password" ]; then
     python3 -c 'import secrets;print(secrets.token_urlsafe(18))' > "$STATE/password"
     chmod 600 "$STATE/password"

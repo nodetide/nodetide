@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import secrets
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -29,10 +30,12 @@ from urllib.parse import parse_qs, quote, urlparse, urlunparse
 
 import aiohttp
 from aiohttp import web
+from nacl.exceptions import CryptoError
+from nacl.secret import SecretBox
 
 from nodetide.core.auth import create_assertion
 from nodetide.core.claims import Attestation, ClaimDocument, ClaimError
-from nodetide.core.crypto import KeyPair
+from nodetide.core.crypto import EncryptionPublicKey, KeyPair
 from nodetide.core.identity import DeviceCapability, Identity, Sigchain
 from nodetide.eidas.notary_statement import NOTARIZABLE, build_notary_statement
 
@@ -44,6 +47,22 @@ VERIFIER_URL = os.environ.get("VERIFIER_URL", "").rstrip("/")  # the independent
 PASSWORD = os.environ["WALLET_PASSWORD"]
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 STATE_FILE = DATA_DIR / "wallet.json"
+# WALLET_KEY_STORE=keychain: wallet.json is encrypted with a random key that lives in the macOS Keychain (keys, claim
+# values and attestations never sit on disk in clear). Unset (the server's container): plain JSON, as before.
+KEY_STORE = os.environ.get("WALLET_KEY_STORE", "")
+KEYCHAIN_SERVICE = "nodetide-test-wallet"
+STATE_MAGIC = b"NTW1"
+# WALLET_LOCAL_APP=1 (the macOS menu-bar app): the browser is logged in by a one-time launch link that the app opens,
+# so nobody types the HTTP password; the session cookie is HttpOnly and not sent on cross-site POSTs.
+LOCAL_APP = os.environ.get("WALLET_LOCAL_APP") == "1"
+LAUNCH_TTL = 60
+# WALLET_START=pair: a wallet with no state yet starts as one more device of an identity held elsewhere (see "Pairing").
+START = os.environ.get("WALLET_START", "")
+PAIRING_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0 O 1 I L
+PAIRING_LENGTH = 10  # about 49 bits: the node only ever sees its hash
+PAIRING_PATHS = {"/", "/healthz", "/launch", "/api/pairing/restart", "/api/pairing/new-identity"}
+launch_tokens: dict[str, float] = {}
+sessions: set[str] = set()
 STATEMENT_DAYS = 7
 SIGNIN_TTL = 600
 ASSURANCE_RANK = {"low": 0, "substantial": 1, "high": 2}
@@ -59,20 +78,64 @@ class WalletError(Exception):
 # --- state ---------------------------------------------------------------------------------------
 
 
+def state_box(create: bool) -> SecretBox:
+    """The cipher for wallet.json, keyed by a 32-byte secret kept in the macOS Keychain (one per state file)."""
+    if KEY_STORE != "keychain":
+        raise SystemExit("WALLET_KEY_STORE must be 'keychain' (or unset for a plain state file)")
+    import keyring  # only needed here
+
+    account = str(STATE_FILE.resolve())
+    stored = keyring.get_password(KEYCHAIN_SERVICE, account)
+    if stored is None:
+        if not create:
+            raise SystemExit(f"wallet.json is encrypted but its key is not in the Keychain ({KEYCHAIN_SERVICE} / {account})")
+        stored = secrets.token_hex(32)
+        keyring.set_password(KEYCHAIN_SERVICE, account, stored)
+    return SecretBox(bytes.fromhex(stored))
+
+
+def load_state() -> tuple[dict[str, Any], bool]:
+    """The saved state, and whether it still has to be rewritten encrypted (a plain file found in Keychain mode)."""
+    if not STATE_FILE.exists():
+        return {}, False
+    raw = STATE_FILE.read_bytes()
+    if raw.startswith(STATE_MAGIC):
+        try:
+            return json.loads(state_box(create=False).decrypt(raw[len(STATE_MAGIC):])), False
+        except CryptoError:
+            raise SystemExit("wallet.json cannot be decrypted with the Keychain key (wrong key or damaged file)") from None
+    return json.loads(raw), KEY_STORE == "keychain"
+
+
 class Wallet:
     def __init__(self) -> None:
-        self.state: dict[str, Any] = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+        self.state, migrate = load_state()
         self.pending: dict[str, dict[str, Any]] = {}  # sign-in previews waiting for approval
+        if migrate:
+            self.save()
 
     def save(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        fd = os.open(STATE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(self.state, f, indent=2, ensure_ascii=False)
+        data = json.dumps(self.state, indent=2, ensure_ascii=False).encode()
+        if KEY_STORE:
+            data = STATE_MAGIC + state_box(create=True).encrypt(data)
+        tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, STATE_FILE)
 
     def ensure_identity(self) -> None:
         if self.state:
             return
+        if START == "pair":
+            label = (os.environ.get("WALLET_DEVICE_LABEL") or socket.gethostname() or "wallet")[:64]
+            self.state = {"pairing": {"device": KeyPair.generate().to_dict(), "label": label}}
+            self.save()
+            return
+        self.create_identity()
+
+    def create_identity(self) -> None:
         identity = Identity.create(name="Test wallet")
         device, _ = identity.add_device(
             "test wallet", capabilities=[DeviceCapability.AUTHENTICATE, DeviceCapability.MANAGE_CLAIMS])
@@ -83,8 +146,14 @@ class Wallet:
 
     @property
     def identity(self) -> Identity:
+        master = self.state.get("master")  # absent on a device that was paired: it never holds the master key
         return Identity(sigchain=Sigchain.from_list(self.state["sigchain"]),
-                        local_keypair=KeyPair.from_dict(self.state["master"]))
+                        local_keypair=KeyPair.from_dict(master) if master else None)
+
+    @property
+    def signer(self) -> KeyPair | None:
+        """Who signs claim events: the master key where we hold it, else this device (it has manage_claims)."""
+        return None if self.state.get("master") else self.device
 
     @property
     def device(self) -> KeyPair:
@@ -105,7 +174,7 @@ class Wallet:
             document = ClaimDocument.create(identity.identity_hash or "", claim_type, value)
         except ClaimError as e:
             raise WalletError(str(e)) from None
-        identity.add_claim(document.claim_id, claim_type, document.commitment)
+        identity.add_claim(document.claim_id, claim_type, document.commitment, signer=self.signer)
         self.state["claims"][document.claim_id] = document.to_dict()
         self.state["sigchain"] = identity.sigchain.to_list()
         self.save()
@@ -394,9 +463,32 @@ async def errors(request: web.Request, handler):
         raise web.HTTPSeeOther("/?err=" + quote(str(e)[:300])) from None
 
 
+def launch_path() -> str:
+    """A one-time link (valid for a minute) that logs a browser in."""
+    for token, expires in list(launch_tokens.items()):
+        if expires < time.time():
+            del launch_tokens[token]
+    token = secrets.token_urlsafe(24)
+    launch_tokens[token] = time.time() + LAUNCH_TTL
+    return "/launch?token=" + token
+
+
+async def launch(request: web.Request) -> web.Response:
+    expires = launch_tokens.pop(request.query.get("token", ""), 0)
+    if expires < time.time():
+        return web.Response(status=403, text="This link was used or has expired: open the wallet from the menu-bar icon again.")
+    session = secrets.token_urlsafe(24)
+    sessions.add(session)
+    response = web.Response(status=303, headers={"Location": "/"})
+    response.set_cookie("wallet_session", session, httponly=True, samesite="Lax", max_age=30 * 24 * 3600)
+    return response
+
+
 @web.middleware
 async def basic_auth(request: web.Request, handler):
-    if request.path == "/healthz":
+    if request.path == "/healthz" or (LOCAL_APP and request.path == "/launch"):
+        return await handler(request)
+    if LOCAL_APP and request.cookies.get("wallet_session") in sessions:
         return await handler(request)
     header = request.headers.get("Authorization", "")
     ok = False
@@ -408,7 +500,16 @@ async def basic_auth(request: web.Request, handler):
         except Exception:
             ok = False
     if not ok:
+        if LOCAL_APP:
+            return web.Response(status=401, text="Open the wallet from the menu-bar icon.")
         return web.Response(status=401, headers={"WWW-Authenticate": 'Basic realm="Nodetide test wallet"'}, text="login required")
+    return await handler(request)
+
+
+@web.middleware
+async def pairing_gate(request: web.Request, handler):
+    if "pairing" in wallet.state and request.path not in PAIRING_PATHS:
+        raise WalletError("this wallet is waiting to be paired with your identity", 409)
     return await handler(request)
 
 
@@ -459,7 +560,7 @@ async def reorder(claim_id: str, how: str) -> str:
         order[index + 1], order[index] = order[index], order[index + 1]
     elif how not in ("default", "up", "down"):
         raise WalletError("how must be default, up or down")
-    identity.set_claim_order(record.claim_type, order)
+    identity.set_claim_order(record.claim_type, order, signer=wallet.signer)
     wallet.state["sigchain"] = identity.sigchain.to_list()
     wallet.save()
     await publish()
@@ -565,6 +666,193 @@ async def api_signin_approve(request: web.Request) -> web.Response:
     raise web.HTTPSeeOther("/?msg=" + quote(f"{result.get('message', '')} Released: {released}."))
 
 
+# --- pairing: more devices for one identity -----------------------------------------------------------------------
+#
+# The identity is its sigchain on the node; the device holding the master key can authorize more devices on it. A new
+# device makes its own keys and opens a "slot" on the node, named by the hash of a code it shows; the owner types the
+# code into the wallet that holds the master key, which authorizes the new device (an add_device event) and leaves the
+# claim values and attestations, sealed to the new device's key, in the slot. The node relays public keys and one
+# sealed message; it can read neither the code nor the answer.
+
+
+def pairing_slot(code: str) -> str:
+    return hashlib.sha256(b"nodetide-pairing:" + code.encode()).hexdigest()
+
+
+def normalize_code(text: Any) -> str:
+    code = "".join(ch for ch in str(text).upper() if ch.isalnum())
+    if len(code) != PAIRING_LENGTH or any(ch not in PAIRING_ALPHABET for ch in code):
+        raise WalletError("that is not a pairing code (10 letters and digits, as shown on the new device)")
+    return code
+
+
+def show_code(code: str) -> str:
+    return f"{code[:5]}-{code[5:]}"
+
+
+def fingerprint(pubkey_hex: str) -> str:
+    digest = hashlib.sha256(bytes.fromhex(pubkey_hex)).hexdigest()[:12]
+    return "-".join(digest[i:i + 4] for i in range(0, 12, 4))
+
+
+async def open_pairing() -> None:
+    """New device: publish a fresh code (also after the old one expired)."""
+    pairing = wallet.state["pairing"]
+    device = KeyPair.from_dict(pairing["device"])
+    code = "".join(secrets.choice(PAIRING_ALPHABET) for _ in range(PAIRING_LENGTH))
+    status, body = await node("POST", "/api/pairing", json={"slot": pairing_slot(code), "request": {
+        "device_pubkey": device.verify_key.to_hex(),
+        "device_encryption_pubkey": device.public_encryption_key.to_hex(), "label": pairing["label"]}})
+    if status != 201:
+        raise WalletError(f"the node did not open a pairing: {body}", 502)
+    pairing["code"], pairing["expires_at"] = code, body["expires_at"]
+    wallet.save()
+
+
+async def check_pairing() -> bool:
+    """New device: take the answer if it is there. True once this wallet has become a device of the identity."""
+    pairing = wallet.state["pairing"]
+    if not pairing.get("code") or pairing["expires_at"] <= time.time():
+        await open_pairing()
+        return False
+    status, body = await node("GET", f"/api/pairing/{pairing_slot(pairing['code'])}")
+    if status == 404:
+        await open_pairing()
+        return False
+    if status != 200:
+        raise WalletError(f"the node refused the pairing check: {body}", 502)
+    if not body.get("response"):
+        return False
+    import_pairing(body["response"])
+    try:
+        await node("DELETE", f"/api/pairing/{pairing_slot(pairing['code'])}")
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        pass  # it expires by itself
+    return True
+
+
+def import_pairing(response: dict[str, Any]) -> None:
+    """New device: open the sealed answer, check it against the identity's chain, and become a device of it."""
+    pairing = wallet.state["pairing"]
+    device = KeyPair.from_dict(pairing["device"])
+    try:
+        sender = EncryptionPublicKey.from_hex(response["from_encryption_pubkey"])
+        payload = json.loads(device.encryption_key.decrypt(base64.b64decode(response["sealed"]), sender))
+        chain = Sigchain.from_list(payload["sigchain"])
+        documents = {cid: ClaimDocument.from_dict(d) for cid, d in payload["claims"].items()}
+        attestations = list(payload["attestations"])
+    except (ValueError, KeyError, TypeError, CryptoError, ClaimError) as e:
+        raise WalletError(f"the answer could not be opened: {e}", 502) from None
+    ok, why = chain.verify()
+    if not ok:
+        raise WalletError(f"the identity's chain does not verify: {why}", 502)
+    devices = chain.get_active_devices()
+    mine = next((d for d in devices if d.pubkey == device.verify_key.to_hex()), None)
+    if (mine is None or mine.encryption_pubkey != device.public_encryption_key.to_hex()
+            or DeviceCapability.MANAGE_CLAIMS.value not in mine.capabilities):
+        raise WalletError("the identity has not authorized this device", 502)
+    if not any(d.encryption_pubkey == response["from_encryption_pubkey"] for d in devices):
+        raise WalletError("the answer did not come from a device of this identity", 502)
+    for claim_id, document in documents.items():
+        if claim_id != document.claim_id or not document.matches(chain.get_claim(claim_id)):
+            raise WalletError("a claim in the answer does not match the identity's chain", 502)
+    wallet.state = {"device": pairing["device"], "sigchain": chain.to_list(),
+                    "claims": {cid: d.to_dict() for cid, d in documents.items()}, "attestations": attestations,
+                    "statements": {}}
+    wallet.save()
+
+
+async def pairing_lookup(code_text: Any) -> tuple[str, dict[str, Any]]:
+    """Wallet holding the master key: find the device that is waiting under this code."""
+    if not wallet.state.get("master"):
+        raise WalletError("this wallet does not hold the master key; add devices from the wallet that does", 403)
+    code = normalize_code(code_text)
+    status, body = await node("GET", f"/api/pairing/{pairing_slot(code)}")
+    if status == 404:
+        raise WalletError("no device is waiting under that code (it may have expired: ask the new device for a new one)", 404)
+    if status != 200:
+        raise WalletError(f"the node refused the lookup: {body}", 502)
+    if body.get("response"):
+        raise WalletError("that device has already been answered", 409)
+    return code, body["request"]
+
+
+async def pairing_approve(code_text: Any) -> str:
+    code, request = await pairing_lookup(code_text)
+    identity = wallet.identity
+    identity.authorize_device(request["device_pubkey"], request["device_encryption_pubkey"], request["label"],
+                              capabilities=[DeviceCapability.AUTHENTICATE, DeviceCapability.MANAGE_CLAIMS])
+    wallet.state["sigchain"] = identity.sigchain.to_list()
+    wallet.save()
+    await publish()
+    sealed = EncryptionPublicKey.from_hex(request["device_encryption_pubkey"]).encrypt(
+        json.dumps({"sigchain": wallet.state["sigchain"], "claims": wallet.state["claims"],
+                    "attestations": wallet.state["attestations"]}).encode(), wallet.device.encryption_key)
+    status, body = await node("PUT", f"/api/pairing/{pairing_slot(code)}/response", json={"response": {
+        "from_encryption_pubkey": wallet.device.public_encryption_key.to_hex(),
+        "sealed": base64.b64encode(sealed).decode()}})
+    if status != 201:
+        raise WalletError(f"the node did not take the answer: {body}", 502)
+    return request["label"]
+
+
+async def api_pairing_preview(request: web.Request) -> web.Response:
+    data = await params(request)
+    code, device = await pairing_lookup(data.get("code", ""))
+    if wants_json(request):
+        return web.json_response({"label": device["label"], "fingerprint": fingerprint(device["device_pubkey"])})
+    return web.Response(content_type="text/html", text=layout(f"""<h2>Add this device?</h2>
+<p><b>{esc(device['label'])}</b>, key fingerprint <code>{fingerprint(device['device_pubkey'])}</code></p>
+<p class="muted">The same fingerprint is shown on the new device. It will be able to add claims, sign you in and see
+your claim values. Only continue if you started this pairing yourself.</p>
+<form method="post" action="/api/devices/approve"><input type="hidden" name="code" value="{esc(show_code(code))}">
+<button>Add the device</button> <a href="/">Cancel</a></form>"""))
+
+
+async def api_pairing_approve(request: web.Request) -> web.Response:
+    data = await params(request)
+    label = await pairing_approve(data.get("code", ""))
+    return done(request, {"label": label}, f"{label} is now a device of your identity. It will pick up your claims in a moment.")
+
+
+async def api_pairing_restart(request: web.Request) -> web.Response:
+    if "pairing" not in wallet.state:
+        raise WalletError("this wallet is not waiting to be paired", 409)
+    await open_pairing()
+    raise web.HTTPSeeOther("/")
+
+
+async def api_pairing_new_identity(request: web.Request) -> web.Response:
+    if "pairing" not in wallet.state:
+        raise WalletError("this wallet is not waiting to be paired", 409)
+    wallet.create_identity()
+    raise web.HTTPSeeOther("/?msg=" + quote("A new identity was created for this wallet."))
+
+
+async def pairing_dashboard(request: web.Request) -> web.Response:
+    """What a wallet waiting to be paired shows (it refreshes itself until the answer arrives)."""
+    problem = ""
+    try:
+        if await check_pairing():
+            raise web.HTTPSeeOther("/?msg=" + quote("Paired: this wallet is now a device of your identity."))
+    except (WalletError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+        problem = f"Waiting for the node: {e}"
+    pairing = wallet.state["pairing"]
+    device = KeyPair.from_dict(pairing["device"])
+    code = pairing.get("code")
+    shown = (f'<p style="font-size:2rem"><code>{esc(show_code(code))}</code></p>' if code else "<p>Getting a code...</p>")
+    return web.Response(content_type="text/html", text=layout(f"""<meta http-equiv="refresh" content="3">
+<h2>Pair this wallet with your identity</h2>
+<p>In the wallet that already holds your identity, open <b>Devices</b> and choose <b>Add a device</b>, then enter:</p>
+{shown}
+<p class="muted">This device: <b>{esc(pairing['label'])}</b>, key fingerprint <code>{fingerprint(device.verify_key.to_hex())}</code>
+(the other wallet shows it before you confirm). The code works for about ten minutes; this page waits for the answer.</p>
+{f'<p class="err">{esc(problem)}</p>' if problem else ''}
+<form method="post" action="/api/pairing/restart" style="display:inline"><button>New code</button></form>
+<form method="post" action="/api/pairing/new-identity" style="display:inline"
+ onsubmit="return confirm('Start a separate, new identity instead of pairing?')"><button>Start a new identity instead</button></form>""", request))
+
+
 # --- pages ---------------------------------------------------------------------------------------------------------
 
 CSS = """body{font:16px/1.5 system-ui,sans-serif;max-width:52rem;margin:1.5rem auto;padding:0 1rem}
@@ -655,7 +943,25 @@ async def delivery_state(claim_id: str) -> str:
     return {"queued": "waiting for the SMS gateway to pick it up", "sent": "SMS sent"}.get(body.get("delivery", ""), "state unknown")
 
 
+def devices_section() -> str:
+    identity = wallet.identity
+    mine = wallet.device.verify_key.to_hex()
+    rows = "".join(
+        f"<tr><td>{esc(d.label)}{' <b>(this device)</b>' if d.pubkey == mine else ''}</td>"
+        f"<td><code>{fingerprint(d.pubkey)}</code></td><td>{esc(', '.join(d.capabilities))}</td></tr>"
+        for d in identity.sigchain.get_active_devices())
+    if identity.is_own:
+        add = ('<form method="post" action="/api/devices/preview">Add a device: code shown on the new device '
+               '<input name="code" required maxlength="16" autocomplete="off" size="14" placeholder="ABCDE-FGHJK"> '
+               '<button>Look at it</button></form>')
+    else:
+        add = '<p class="muted">New devices are added from the wallet that holds the master key.</p>'
+    return f"<h2>Devices</h2><table><tr><th>device</th><th>key fingerprint</th><th>may</th></tr>{rows}</table>{add}"
+
+
 async def dashboard(request: web.Request) -> web.Response:
+    if "pairing" in wallet.state:
+        return await pairing_dashboard(request)
     view = state_view()
     identity = view["identity"]
     rows = []
@@ -702,6 +1008,7 @@ async def dashboard(request: web.Request) -> web.Response:
 <form method="post" action="/api/claims/name">Legal name as on your certificate:
 <input type="text" name="given" placeholder="given name" required> <input type="text" name="family" placeholder="family name" required> <button>Add</button></form>
 {eid_section}
+{devices_section()}
 <h2>Approve a sign-in</h2>
 <form method="post" action="/api/signin/preview">Sign-in address from the application:
 <input type="url" name="login_url" required placeholder="{esc(NODE_URL)}/oidc/login/..."> <button>Look at it</button></form>
@@ -715,9 +1022,11 @@ async def healthz(request: web.Request) -> web.Response:
 
 def build_app() -> web.Application:
     wallet.ensure_identity()
-    app = web.Application(middlewares=[basic_auth, errors], client_max_size=4 * 1024 * 1024)
+    app = web.Application(middlewares=[basic_auth, errors, pairing_gate], client_max_size=4 * 1024 * 1024)
     app.router.add_get("/", dashboard)
     app.router.add_get("/healthz", healthz)
+    if LOCAL_APP:
+        app.router.add_get("/launch", launch)
     app.router.add_get("/signin", signin_link)
     app.router.add_get("/api/state", api_state)
     app.router.add_post("/api/claims/email", api_claim_email)
@@ -732,6 +1041,10 @@ def build_app() -> web.Application:
     app.router.add_post("/api/claims/age", api_claim_age)
     app.router.add_post("/api/signin/preview", api_signin_preview)
     app.router.add_post("/api/signin/approve", api_signin_approve)
+    app.router.add_post("/api/devices/preview", api_pairing_preview)
+    app.router.add_post("/api/devices/approve", api_pairing_approve)
+    app.router.add_post("/api/pairing/restart", api_pairing_restart)
+    app.router.add_post("/api/pairing/new-identity", api_pairing_new_identity)
 
     async def start(app: web.Application) -> None:
         app["publisher"] = asyncio.create_task(publish_forever(app))
