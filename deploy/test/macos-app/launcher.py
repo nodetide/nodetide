@@ -163,7 +163,11 @@ def main() -> None:
         WALLET_START=config.get("start", ""),  # only matters while the wallet has no state yet
         WALLET_LOCAL_APP="1",
     )
-    import app as wallet_app  # reads its settings from the environment when imported
+    try:
+        import app as wallet_app  # reads its settings from the environment when imported
+    except SystemExit as e:  # for example a state file whose Keychain key is gone; nobody sees stderr in a menu-bar app
+        rumps.alert("Nodetide Wallet", f"The wallet cannot start:\n\n{e}\n\nThe state is in {SUPPORT / 'data'}.")
+        return
 
     server = Server(wallet_app, port)
     server.start()
