@@ -52,7 +52,7 @@ jobs:
     outputs:
       ipv4: ${{ steps.out.outputs.ipv4 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check configuration
         run: |
@@ -65,7 +65,7 @@ jobs:
             exit 1
           fi
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "~> 1.12"
           terraform_wrapper: false
@@ -117,7 +117,7 @@ jobs:
       SERVER: ${{ needs.terraform.outputs.ipv4 }}
       DEPLOY_USER: deploy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: SSH setup
         env:
