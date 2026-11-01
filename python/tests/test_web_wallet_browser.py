@@ -84,14 +84,14 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                     URL.createObjectURL=(b)=>{ b.text().then(t=>window.__files.push(t)); return orig(b); };""", wait=False)
 
                 # a name with non-ASCII letters: the node only accepts it if the client signs what Python reproduces
-                await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'Алекс',
+                await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'Алекс\\u007f',
                     method:'password',password:'wallet-pass-12',confirmPassword:'wallet-pass-12',distributionPoints:''}};
                     await m.createIdentity();}})()""")
                 await asyncio.sleep(1)
                 identity = await page.js("Alpine.store('identity').activeHash")
                 async with http.get(f"{base}/api/identities/{identity}") as r:
                     info = await r.json()
-                assert info["name"] == "Алекс" and info["verified"] is True
+                assert info["name"] == "Алекс\x7f" and info["verified"] is True   # (DEL is escaped like Python does, or the node refuses the signature)
 
                 # the organizations card is on the My Identity tab, visible even while the wallet is locked
                 await page.js("Alpine.store('app').setView('identity')")

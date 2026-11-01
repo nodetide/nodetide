@@ -76,9 +76,9 @@
       }
       return sorted;
     }
-    // Python signs json.dumps(..., ensure_ascii=True): every non-ASCII character is a \\uXXXX escape. Match it, or
+    // Python signs json.dumps(..., ensure_ascii=True): every character outside space..~ (so DEL and all non-ASCII) is a \\uXXXX escape. Match it, or
     // a name or label with such a character gives a signature and a hash the node does not reproduce.
-    return JSON.stringify(sortRecursive(obj)).replace(/[\u0080-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+    return JSON.stringify(sortRecursive(obj)).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
   }
 
   // Sigchain v2 (sigchain-v2.md): claims are CONTENT events; everything else is the control chain, whose events

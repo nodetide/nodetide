@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "eu.kuklin.nodetide"
-    compileSdk = 36
+    compileSdk = 37   // the current libraries are built against API 37; targetSdk (what Play checks) stays 36
 
     defaultConfig {
         applicationId = "eu.kuklin.nodetide"

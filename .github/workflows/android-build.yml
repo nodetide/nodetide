@@ -45,12 +45,28 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
 
+      - name: Build Release App Bundle (what Google Play takes)
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Check 16 KB page-size support of the native libraries (Google Play requirement)
+        run: |
+          python3 android/tools/check_16k.py android/app/build/outputs/apk/release/*.apk
+          python3 android/tools/check_16k.py android/app/build/outputs/bundle/release/*.aab
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v7
         with:
           name: nodetide-debug
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      - name: Upload Release App Bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodetide-release-bundle
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v7

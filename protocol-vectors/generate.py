@@ -112,9 +112,9 @@ light_proofs.append({"seq": 1, "event": light_proofs[0]["event"], "proof": light
 add("personal-light", "the same chain without its content (control events only), plus proofs for single content events",
     me.sigchain, light=True, attach=light_proofs)
 
-ident = person("Алекс 😀 \"quoted\" \\ back")
+ident = person("Алекс 😀 \"quoted\" \\ back \x7f del \x01 ctl")
 ident.add_device("телефон", capabilities=[D.AUTHENTICATE])
-add("non-ascii", "names and labels with non-ASCII characters, quotes and backslashes (canonical JSON escaping)", ident.sigchain)
+add("non-ascii", "names and labels with non-ASCII characters, quotes, backslashes, DEL and control characters (canonical JSON escaping)", ident.sigchain)
 
 # ---- content rules
 c = person()
