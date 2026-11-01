@@ -111,9 +111,12 @@ data class DiscoveredRelay(
     val name: String,
     val host: String,
     val port: Int,
-    val properties: Map<String, String> = emptyMap()
+    val properties: Map<String, String> = emptyMap(),
+    val scheme: String = "http",
+    /** Identity hashes the node says it serves (unauthenticated: anybody on the network can claim any). */
+    val ids: List<String> = emptyList()
 ) {
-    val url: String get() = "http://$host:$port"
+    val url: String get() = "$scheme://$host:$port"
 }
 
 /**

@@ -3,11 +3,18 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Android: finding a node on the LAN)
+
+- **Android browses for nodes and offers the one that serves your identity** (`RelayDiscoveryService`, Relays screen): queued resolves (NsdManager allows one at a time), announcements filtered by `Lan.fromAnnouncement`
+  (version, numeric IPv4 on a local range, valid port; new JVM-tested code in `android/protocol`), a "Use" card when the account's hash is advertised, with the caveat that it is only an announcement. Nothing connects
+  by itself. **Cleartext is now enforced in code**: `Lan.cleartextAllowed` on every `ApiClient` request and on manual addresses (http only on the local network, no redirects); the network security config's CIDR
+  `domain-config` entries, which never matched anything, are gone. Not run on a device.
+
 ## 2026-11-02 (mDNS)
 
 - **LAN discovery connected** (`lan-discovery.md`): the announcement now carries `scheme` and, if the operator chooses (`NODETIDE_MDNS_IDENTITIES`), up to 3 identity hashes; `nodetide relay discover` shows them. With
   `NODETIDE_MDNS_DISCOVER=1` the identity fetcher uses nodes found on the LAN as a source after the internet and before email, only at addresses on networks the machine is attached to (never itself, loopback,
-  the metadata address or multicast; max 8; fixed read-only request). Tests include a real announce/discover round trip (`NODETIDE_MDNS_TESTS=1`). Android browsing is not done.
+  the metadata address or multicast; max 8; fixed read-only request). Tests include a real announce/discover round trip (`NODETIDE_MDNS_TESTS=1`). Android browsing: see the next entry.
 
 ## 2026-11-02 (mailto: distribution points)
 

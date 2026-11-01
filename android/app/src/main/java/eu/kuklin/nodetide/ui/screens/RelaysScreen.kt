@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import eu.kuklin.nodetide.NodetideApp
 import eu.kuklin.nodetide.data.DiscoveredRelay
+import eu.kuklin.nodetide.discovery.toRelay
+import eu.kuklin.nodetide.protocol.Lan
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -27,31 +29,48 @@ fun RelaysScreen(navController: NavController) {
     val discoveryService = remember { NodetideApp.instance.discoveryService }
 
     val currentRelayUrl by settingsStore.relayUrl.collectAsState(initial = null)
+    val identity by NodetideApp.instance.identityStore.currentIdentity.collectAsState(initial = null)
 
-    var discoveredRelays by remember { mutableStateOf<List<DiscoveredRelay>>(emptyList()) }
+    // Browse while this screen is open; the nodes come in as they are found
+    DisposableEffect(Unit) {
+        discoveryService.start()
+        onDispose { discoveryService.stop() }
+    }
+    val lanNodes by discoveryService.nodes.collectAsState()
+    val mine = identity?.identityHash?.let { Lan.matching(lanNodes, it) }.orEmpty()
+    val discoveredRelays = lanNodes.map { it.toRelay() }
+
     var isDiscovering by remember { mutableStateOf(false) }
     var manualUrl by remember { mutableStateOf("") }
     var showManualDialog by remember { mutableStateOf(false) }
+    var manualError by remember { mutableStateOf<String?>(null) }
 
     fun discoverRelays() {
         scope.launch {
             isDiscovering = true
-            val relays = discoveryService.discoverRelaysForDuration(5000)
-            discoveredRelays = relays
+            discoveryService.stop()      // a fresh browse; the list fills in as nodes answer
+            discoveryService.start()
+            kotlinx.coroutines.delay(3000)
             isDiscovering = false
         }
     }
 
     fun connectToRelay(relay: DiscoveredRelay) {
         scope.launch {
-            val url = "http://${relay.host}:${relay.port}"
-            settingsStore.setRelayUrl(url, relay.name)
+            settingsStore.setRelayUrl(relay.url, relay.name)
         }
     }
 
     fun connectToManualUrl(url: String) {
+        val clean = url.trim().trimEnd('/')
+        if (!Lan.cleartextAllowed(clean)) {
+            manualError = "Use https:// for a node outside your own network"
+            return
+        }
+        manualError = null
+        showManualDialog = false
         scope.launch {
-            settingsStore.setRelayUrl(url, "Manual")
+            settingsStore.setRelayUrl(clean, "Manual")
         }
     }
 
@@ -65,16 +84,15 @@ fun RelaysScreen(navController: NavController) {
                     onValueChange = { manualUrl = it },
                     label = { Text("Relay URL") },
                     placeholder = { Text("http://192.168.1.100:8080") },
+                    isError = manualError != null,
+                    supportingText = if (manualError != null) { { Text(manualError ?: "") } } else null,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        connectToManualUrl(manualUrl)
-                        showManualDialog = false
-                    },
+                    onClick = { connectToManualUrl(manualUrl) },
                     enabled = manualUrl.isNotBlank()
                 ) {
                     Text("Connect")
@@ -100,6 +118,43 @@ fun RelaysScreen(navController: NavController) {
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
+        }
+
+        if (mine.isNotEmpty() && mine.none { it.baseUrl == currentRelayUrl }) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (mine.size == 1) "A node on this network serves your identity" else "${mine.size} nodes on this network say they serve your identity",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "This is what the node announces; anyone on the network could announce your identity. " +
+                                "Use it only if you recognise the address as your own.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        mine.forEach { node ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(node.name, fontWeight = FontWeight.Medium)
+                                    Text("${node.host}:${node.port}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Button(onClick = { connectToRelay(node.toRelay()) }) { Text("Use") }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         item {
@@ -228,7 +283,7 @@ fun RelaysScreen(navController: NavController) {
         items(discoveredRelays) { relay ->
             DiscoveredRelayCard(
                 relay = relay,
-                isConnected = currentRelayUrl == "http://${relay.host}:${relay.port}",
+                isConnected = currentRelayUrl == relay.url,
                 onConnect = { connectToRelay(relay) }
             )
         }

@@ -17,6 +17,17 @@ Multicast is unauthenticated, so an announcement must not be able to aim the nod
 (from the interface list), is not our own address, loopback, link-local metadata (`169.254.169.254`) or multicast; at most 8; IPv4 only; and the only request ever made is
 `GET /api/identities/<hash>/sigchain` (no redirects, 2 MB cap, short timeout). What a hostile LAN device can still do is withhold data or see which identity is asked for.
 
+## Android
+
+The Relays screen browses while it is open (`RelayDiscoveryService`, NsdManager; resolves are queued because Android allows one at a time). Every announcement passes `Lan.fromAnnouncement`
+(`android/protocol`, tested on the JVM): version 1, a plain IPv4 address on a local range, a valid port. If the current account's hash is among a node's advertised `ids`, a card offers **"Use"**
+for it, with the plain statement that this is only what the node announces: anyone on the network can announce any identity, so the user confirms by recognising the address. Nothing is
+connected automatically.
+
+Cleartext http is permitted at the platform level (the network security config cannot express "private ranges only", and its old CIDR entries matched nothing), so the app enforces it:
+`Lan.cleartextAllowed` is applied to every request by `ApiClient` and to a manually typed address; http is only for local addresses and `.local` names, https for anything else, redirects are not followed.
+
 ## Not done
 
-Android browsing (`NsdManager`) to find a home node for pairing and sync; the web client cannot use mDNS at all.
+The web client cannot use mDNS at all. Android 17 introduces a local-network permission for apps targeting its API level (not needed at target 36; to add when the target moves). The Android part has
+been compiled and its pure logic tested, but not run on a device.

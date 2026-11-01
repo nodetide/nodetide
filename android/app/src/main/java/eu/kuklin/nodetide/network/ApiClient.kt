@@ -3,6 +3,7 @@ package eu.kuklin.nodetide.network
 import eu.kuklin.nodetide.crypto.SodiumVerifier
 import eu.kuklin.nodetide.data.*
 import eu.kuklin.nodetide.protocol.ChainError
+import eu.kuklin.nodetide.protocol.Lan
 import eu.kuklin.nodetide.protocol.Options
 import eu.kuklin.nodetide.protocol.Sigchain
 import kotlinx.serialization.json.JsonObject
@@ -19,7 +20,15 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 class ApiClient(private val baseUrl: String) {
+    // Android's network security config has to allow cleartext (it cannot express "local addresses only"), so this is
+    // where it is enforced: http goes to the local network, everything else must be https.
     private val client = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            val url = chain.request().url.toString()
+            if (!Lan.cleartextAllowed(url)) throw java.io.IOException("refusing cleartext http outside the local network")
+            chain.proceed(chain.request())
+        }
+        .followRedirects(false)    // a node must not be able to send us elsewhere
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()

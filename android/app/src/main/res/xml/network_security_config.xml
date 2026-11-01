@@ -1,17 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext traffic to local network relays -->
+    <!--
+      Nodes on the local network are plain http at a bare IP address, and this file cannot express "private ranges only"
+      (domain-config takes names, not CIDR blocks). So cleartext is permitted here and refused in code for anything that is
+      not a local address: see Lan.cleartextAllowed, applied by ApiClient to every request. https is verified against the
+      system roots as usual.
+    -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-
-    <!-- Local network domains -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">10.0.0.0/8</domain>
-        <domain includeSubdomains="true">172.16.0.0/12</domain>
-        <domain includeSubdomains="true">192.168.0.0/16</domain>
-    </domain-config>
 </network-security-config>

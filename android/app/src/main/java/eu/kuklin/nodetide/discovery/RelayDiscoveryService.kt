@@ -5,192 +5,127 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
 import eu.kuklin.nodetide.data.DiscoveredRelay
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
+import eu.kuklin.nodetide.protocol.Lan
+import eu.kuklin.nodetide.protocol.LanNode
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import java.net.Inet4Address
 
 /**
- * Service for discovering nodetide relays on the local network via mDNS/DNS-SD.
+ * Finds Nodetide nodes on the local network (mDNS / DNS-SD, `_nodetide._tcp`, see lan-discovery.md).
+ *
+ * Android's NsdManager resolves one service at a time (a second concurrent resolve fails with FAILURE_ALREADY_ACTIVE), so
+ * resolves are queued. Everything found goes through [Lan.fromAnnouncement]: only plain IPv4 addresses on local ranges,
+ * only announcements of the right version. The result says what a node *claims*; nothing here proves it is the user's node.
  */
 class RelayDiscoveryService(private val context: Context) {
 
     companion object {
         private const val TAG = "RelayDiscovery"
         private const val SERVICE_TYPE = "_nodetide._tcp."
+        private const val RESOLVE_TIMEOUT_MS = 4000L
     }
 
-    private val nsdManager: NsdManager by lazy {
-        context.getSystemService(Context.NSD_SERVICE) as NsdManager
-    }
+    private val nsdManager: NsdManager by lazy { context.getSystemService(Context.NSD_SERVICE) as NsdManager }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val resolving = Mutex()
 
-    private var discoveryListener: NsdManager.DiscoveryListener? = null
-    private val discoveredServices = mutableMapOf<String, NsdServiceInfo>()
+    private var listener: NsdManager.DiscoveryListener? = null
+    private var starts = 0
+    private val found = mutableMapOf<String, LanNode>()
+    private val _nodes = MutableStateFlow<List<LanNode>>(emptyList())
 
-    /**
-     * Discover relays as a Flow that emits discovered relays.
-     */
-    fun discoverRelays(): Flow<DiscoveredRelay> = callbackFlow {
-        val listener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) {
-                Log.d(TAG, "Discovery started for $serviceType")
-            }
+    /** The nodes currently on the network (empty until [start]). */
+    val nodes: StateFlow<List<LanNode>> = _nodes.asStateFlow()
+
+    /** Start browsing; nested calls are counted, so a screen and a banner can both ask. */
+    @Synchronized
+    fun start() {
+        if (starts++ > 0) return
+        val l = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) { Log.d(TAG, "discovery started") }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "Service found: ${serviceInfo.serviceName}")
-                // Resolve the service to get host and port
-                resolveService(serviceInfo) { relay ->
-                    relay?.let { trySend(it) }
-                }
+                scope.launch { resolve(serviceInfo) }
             }
 
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "Service lost: ${serviceInfo.serviceName}")
-                discoveredServices.remove(serviceInfo.serviceName)
+                synchronized(found) { found.remove(serviceInfo.serviceName) }
+                publish()
             }
 
-            override fun onDiscoveryStopped(serviceType: String) {
-                Log.d(TAG, "Discovery stopped for $serviceType")
-            }
-
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "Discovery start failed: $errorCode")
-                close(Exception("Discovery start failed: $errorCode"))
-            }
-
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "Discovery stop failed: $errorCode")
-            }
+            override fun onDiscoveryStopped(serviceType: String) { Log.d(TAG, "discovery stopped") }
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { Log.e(TAG, "start failed: $errorCode") }
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) { Log.e(TAG, "stop failed: $errorCode") }
         }
-
-        discoveryListener = listener
-
+        listener = l
         try {
-            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start discovery", e)
-            close(e)
-        }
-
-        awaitClose {
-            stopDiscovery()
+            Log.e(TAG, "could not start discovery", e)
+            listener = null
+            starts = 0
         }
     }
 
-    /**
-     * Discover relays for a specified duration and return all found.
-     */
+    @Synchronized
+    fun stop() {
+        if (starts == 0 || --starts > 0) return
+        listener?.let { runCatching { nsdManager.stopServiceDiscovery(it) } }
+        listener = null
+        synchronized(found) { found.clear() }
+        publish()
+    }
+
+    /** Browse for a while and return what was found (the manual "Discover" button). */
     suspend fun discoverRelaysForDuration(durationMs: Long): List<DiscoveredRelay> {
-        val relays = mutableListOf<DiscoveredRelay>()
-
-        return suspendCancellableCoroutine { continuation ->
-            val listener = object : NsdManager.DiscoveryListener {
-                override fun onDiscoveryStarted(serviceType: String) {
-                    Log.d(TAG, "Discovery started")
-                }
-
-                override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                    Log.d(TAG, "Service found: ${serviceInfo.serviceName}")
-                    resolveService(serviceInfo) { relay ->
-                        relay?.let {
-                            synchronized(relays) {
-                                if (relays.none { r -> r.host == it.host && r.port == it.port }) {
-                                    relays.add(it)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
-                override fun onDiscoveryStopped(serviceType: String) {}
-                override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                    continuation.resume(emptyList())
-                }
-                override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
-            }
-
-            discoveryListener = listener
-
-            try {
-                nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
-
-                // Schedule stop after duration
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    stopDiscovery()
-                    continuation.resume(relays.toList())
-                }, durationMs)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start discovery", e)
-                continuation.resume(emptyList())
-            }
-
-            continuation.invokeOnCancellation {
-                stopDiscovery()
-            }
+        start()
+        try {
+            delay(durationMs)
+            return nodes.value.map { it.toRelay() }
+        } finally {
+            stop()
         }
     }
 
-    private fun resolveService(serviceInfo: NsdServiceInfo, callback: (DiscoveredRelay?) -> Unit) {
-        nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-            override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                Log.e(TAG, "Resolve failed for ${serviceInfo.serviceName}: $errorCode")
-                callback(null)
-            }
-
-            override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "Service resolved: ${serviceInfo.serviceName} at ${serviceInfo.host}:${serviceInfo.port}")
-                discoveredServices[serviceInfo.serviceName] = serviceInfo
-
-                val properties = mutableMapOf<String, String>()
-                serviceInfo.attributes?.forEach { (key, value) ->
-                    properties[key] = value?.toString(Charsets.UTF_8) ?: ""
-                }
-
-                callback(
-                    DiscoveredRelay(
-                        name = serviceInfo.serviceName,
-                        host = serviceInfo.host?.hostAddress ?: "",
-                        port = serviceInfo.port,
-                        properties = properties
-                    )
-                )
-            }
-        })
+    private fun publish() {
+        _nodes.update { synchronized(found) { found.values.sortedBy { it.name } } }
     }
 
-    /**
-     * Stop discovery.
-     */
-    fun stopDiscovery() {
-        discoveryListener?.let { listener ->
-            try {
-                nsdManager.stopServiceDiscovery(listener)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to stop discovery", e)
-            }
-            discoveryListener = null
+    @Suppress("DEPRECATION") // resolveService is deprecated from API 34 but still the call that works down to minSdk 26
+    private suspend fun resolve(info: NsdServiceInfo) = resolving.withLock {
+        val done = CompletableDeferred<NsdServiceInfo?>()
+        try {
+            nsdManager.resolveService(info, object : NsdManager.ResolveListener {
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) { done.complete(null) }
+                override fun onServiceResolved(serviceInfo: NsdServiceInfo) { done.complete(serviceInfo) }
+            })
+        } catch (e: Exception) {
+            done.complete(null)
         }
-    }
-
-    /**
-     * Get currently discovered relays.
-     */
-    fun getDiscoveredRelays(): List<DiscoveredRelay> {
-        return discoveredServices.values.mapNotNull { serviceInfo ->
-            val host = serviceInfo.host?.hostAddress ?: return@mapNotNull null
-            val properties = mutableMapOf<String, String>()
-            serviceInfo.attributes?.forEach { (key, value) ->
-                properties[key] = value?.toString(Charsets.UTF_8) ?: ""
-            }
-            DiscoveredRelay(
-                name = serviceInfo.serviceName,
-                host = host,
-                port = serviceInfo.port,
-                properties = properties
-            )
+        val resolved = withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { done.await() } ?: return@withLock
+        val host = (resolved.host as? Inet4Address)?.hostAddress ?: return@withLock    // numeric IPv4 only
+        val attributes = resolved.attributes.orEmpty().mapValues { (_, v) -> v?.toString(Charsets.UTF_8) ?: "" }
+        val node = Lan.fromAnnouncement(resolved.serviceName, host, resolved.port, attributes)
+        if (node == null) {
+            Log.d(TAG, "ignoring an announcement that is not a usable local node")
+            return@withLock
         }
+        synchronized(found) { found[resolved.serviceName] = node }
+        publish()
     }
 }
+
+fun LanNode.toRelay() = DiscoveredRelay(name = name, host = host, port = port, properties = properties, scheme = scheme, ids = ids)
