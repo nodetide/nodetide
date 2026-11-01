@@ -31,6 +31,9 @@ still open, so a new session can pick up without re-deriving context.
   the root secret and the fallback, the wrapped copy lives only in this browser's storage, and removing the passkey deletes it. The RP id is the page's host name
   (a passkey does not follow the site to another domain). Tested with a CDP virtual authenticator (`test_passkey_unlocks_the_wallet`). Not a signing key: the
   protocol's keys are still Ed25519 and the backup file remains the safety net.
+  Also in "Create Identity": the Passkey option (it was hard-disabled as "not supported") makes an identity with NO password: a random secret generated in the
+  browser, held only wrapped by the passkey (`storageMethod: webauthn`). Forms that ask for the identity password accept an empty field for such an identity
+  and the passkey stands in (backup, recovery, organization approval, unlock).
 
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between

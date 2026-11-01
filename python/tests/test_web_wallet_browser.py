@@ -275,6 +275,26 @@ async def test_passkey_unlocks_the_wallet():
                 await load()
                 assert await page.js(f"{wallet}.hasPasskey") is False
                 assert "No passkey" in await attempt(f"await {wallet}.unlockWithPasskey();")
+
+                # an identity made WITH a passkey has no password at all
+                assert await page.js(f"{comp('[x-data=identityManager]')}.webauthnSupported") is True
+                await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'no-password',
+                    method:'webauthn',password:'',confirmPassword:'',distributionPoints:''}}; await m.createIdentity();}})()""")
+                await asyncio.sleep(1.5)
+                made = await page.js("JSON.parse(JSON.stringify(Alpine.store('identity').activeIdentity))")
+                assert made["name"] == "no-password" and made["storageMethod"] == "webauthn" and made["passkey"]
+                async with http.get(f"{base}/api/identities/{made['identityHash']}") as r:
+                    assert r.status == 200 and (await r.json())["verified"] is True
+                await load()
+                assert await attempt(f"const c={wallet}; await c.unlockWithPasskey();") is None
+                assert await page.js("Alpine.store('wallet').unlocked") is True
+                # the typed-password forms accept an empty field for such an identity: the passkey stands in
+                await page.js("""window.__files=[]; const orig=URL.createObjectURL;
+                    URL.createObjectURL=(b)=>{ b.text().then(t=>window.__files.push(t)); return orig(b); };""", wait=False)
+                assert await attempt(f"const c={comp('[x-data=protectionUI]')}; c.backup={{identityPassword:'',"
+                                     "password:'correct horse battery',confirm:'correct horse battery'}; await c.makeBackup();") is None
+                await asyncio.sleep(0.5)
+                assert json.loads((await page.js("window.__files"))[0])["holds_master_key"] is True
     finally:
         if chrome:
             chrome.terminate()

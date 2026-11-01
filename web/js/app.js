@@ -341,7 +341,8 @@
       const identity = this.getIdentity(identityHash);
       if (!identity) throw new Error('Identity not found');
 
-      if (identity.storageMethod === StorageMethod.PASSWORD) {
+      if (identity.storageMethod === StorageMethod.PASSWORD || identity.storageMethod === StorageMethod.WEBAUTHN) {
+        password = await this._pw(identity, password);
         try {
           return await Crypto.decryptWithPassword(identity.encryptedKeys, password);
         } catch {
@@ -370,7 +371,15 @@
       localStorage.setItem(STORAGE_KEYS.IDENTITIES, JSON.stringify(identities));
     },
 
+    async _pw(identity, password) {
+      /** The typed password, or (none typed, identity has a passkey) the one the authenticator unwraps. */
+      if (password) return password;
+      if (identity && identity.passkey) return Passkey.password(identity.identityHash);
+      return password;
+    },
+
     async _unlockBoth(identity, password) {
+      password = await this._pw(identity, password);
       try {
         return {
           master: await Crypto.decryptWithPassword(identity.encryptedMasterKeys, password),
@@ -393,6 +402,7 @@
       if (weak) throw new Error(weak);
       if (!identity.encryptedMasterKeys) throw new Error('This identity has no master key stored here');
 
+      identityPassword = await this._pw(identity, identityPassword); // empty + passkey: the authenticator supplies it
       const keys = await this._unlockBoth(identity, identityPassword);
       const payload = {
         name: identity.name, distribution_points: identity.distributionPoints || null, created_at: identity.createdAt,
@@ -970,6 +980,7 @@
       const identity = KeyStore.getIdentity(hash);
       if (!identity) throw new Error('Identity not found');
       if (!identity.encryptedMasterKeys) throw new Error('This browser does not hold this identity\'s master key');
+      password = await KeyStore._pw(identity, password);
       const { master, device } = await KeyStore._unlockBoth(identity, password);
       let data = this.emptyData();
       const stored = localStorage.getItem(this.storageKey(hash));
@@ -1875,12 +1886,20 @@
         Alpine.store('identity').reload();
       },
 
-      get webauthnSupported() { return false; }, // Simplified - disabled for now
+      get webauthnSupported() { return Passkey.supported(); },
 
       async createIdentity() {
-        const { name, method, password, confirmPassword, distributionPoints } = this.createForm;
+        const { name, method, confirmPassword, distributionPoints } = this.createForm;
+        let password = this.createForm.password;
 
-        if (method === 'password') {
+        if (method === 'webauthn') {
+          if (!Passkey.supported()) {
+            Alpine.store('app').showError('This browser has no passkey support');
+            return;
+          }
+          // No password to remember: a random secret, held only wrapped by the passkey
+          password = Passkey._b64(crypto.getRandomValues(new Uint8Array(32)));
+        } else if (method === 'password') {
           if (!password || password.length < 8) {
             Alpine.store('app').showError('Password must be at least 8 characters');
             return;
@@ -1902,6 +1921,15 @@
         try {
           console.log('[createIdentity] calling KeyStore.createIdentityWithPassword...');
           const result = await KeyStore.createIdentityWithPassword(name, password, distPoints);
+          if (method === 'webauthn') {
+            try {
+              await Passkey.enroll(result.identity.identityHash, password);
+            } catch (e) {
+              KeyStore.deleteIdentity(result.identity.identityHash); // nothing was published yet; leave no half-made identity
+              throw e;
+            }
+            KeyStore.updateIdentity(result.identity.identityHash, { storageMethod: StorageMethod.WEBAUTHN });
+          }
           console.log('[createIdentity] identity created locally, hash:', result.identity.identityHash);
           console.log('[createIdentity] identity.distributionPoints:', result.identity.distributionPoints);
 
