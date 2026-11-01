@@ -21,6 +21,7 @@ dependencies = [
     "cryptography>=41.0",
     "pynacl>=1.5",
     "zeroconf>=0.80",
+    "ifaddr>=0.2",
     "click>=8.0",
     "aiosqlite>=0.19",
     "aiohttp>=3.9",

@@ -878,7 +878,8 @@ def relay_discover(timeout: int, as_json: bool):
     def on_found(ip: str, port: int, props: dict):
         relays_found.append({"ip": ip, "port": port, "properties": props})
         if not as_json:
-            click.echo(f"  Found: {ip}:{port}")
+            ids = [h[:12] + "..." for h in str(props.get("ids", "")).split(",") if h]
+            click.echo(f"  Found: {ip}:{port}" + (f"  (advertises {', '.join(ids)})" if ids else ""))
 
     async def discover():
         if not as_json:

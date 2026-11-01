@@ -17,6 +17,26 @@ SERVICE_TYPE = "_nodetide._tcp.local."
 SERVICE_NAME = "Nodetide Relay._nodetide._tcp.local."
 
 
+MAX_IDS = 3          # a TXT record is small; this many 64-hex identity hashes fit with room to spare
+_HASH = __import__("re").compile(r"^[0-9a-f]{64}$")
+
+
+def txt_properties(identities: "list[str] | tuple[str, ...]" = (), scheme: str = "http", extra: "dict[str, str] | None" = None) -> dict[str, str]:
+    """What a node says about itself on the LAN. `ids` lists identities the operator chose to advertise (never all of them:
+    everybody on the network can read this); a client that wants *its* node looks for its own hash here."""
+    props = {"version": "1", "path": "/api", "scheme": scheme if scheme in ("http", "https") else "http"}
+    ids = [h for h in dict.fromkeys(identities) if isinstance(h, str) and _HASH.match(h)][:MAX_IDS]
+    if ids:
+        props["ids"] = ",".join(ids)
+    props.update(extra or {})
+    return props
+
+
+def parse_ids(props: "dict[str, str]") -> list[str]:
+    """The identity hashes a discovered node advertises (valid ones only)."""
+    return [h for h in str(props.get("ids", "")).split(",") if _HASH.match(h)][:MAX_IDS]
+
+
 def get_local_ip() -> str:
     """Get the local IP address."""
     try:
@@ -38,6 +58,8 @@ class RelayMDNS:
         port: int = 4557,
         name: str | None = None,
         properties: dict[str, str] | None = None,
+        identities: "list[str] | tuple[str, ...]" = (),
+        scheme: str = "http",
     ):
         """Initialize mDNS announcement.
 
@@ -48,7 +70,7 @@ class RelayMDNS:
         """
         self.port = port
         self.name = name or socket.gethostname()
-        self.properties = properties or {}
+        self.properties = txt_properties(identities, scheme, properties)
         self._zeroconf: AsyncZeroconf | None = None
         self._service_info: ServiceInfo | None = None
 
@@ -59,12 +81,7 @@ class RelayMDNS:
 
         local_ip = get_local_ip()
 
-        # Build service properties
-        props = {
-            "version": "1",
-            "path": "/api",
-            **self.properties,
-        }
+        props = dict(self.properties)
 
         # Create service info
         service_name = f"{self.name}.{SERVICE_TYPE}"
@@ -98,11 +115,7 @@ class RelayMDNS:
             return
 
         self.properties.update(properties)
-        props = {
-            "version": "1",
-            "path": "/api",
-            **self.properties,
-        }
+        props = dict(self.properties)
 
         # Update service info
         self._service_info.properties = props
@@ -186,6 +199,16 @@ class RelayDiscovery:
             self._zeroconf = None
 
         logger.info("mDNS: Stopped relay discovery")
+
+    def peers(self) -> list[dict]:
+        """Discovered nodes as dicts: name, ip, port, scheme, ids, properties (announcements of a wrong version are skipped)."""
+        out = []
+        for name, (ip, port, props) in self._relays.items():
+            if props.get("version") != "1":
+                continue
+            out.append({"name": name, "ip": ip, "port": port, "scheme": props.get("scheme", "http"),
+                        "ids": parse_ids(props), "properties": props})
+        return out
 
     def get_relays(self) -> list[tuple[str, int, dict]]:
         """Get list of discovered relays.

@@ -60,6 +60,7 @@ class IdentityFetcher:
         seed_nodes: Iterable[str] = (),
         fetch: FetchFn | None = None,
         on_update: UpdateFn | None = None,
+        lan_fetch: FetchFn | None = None,
         allow_private: bool = False,
         clock: Callable[[], float] = time.time,
     ):
@@ -69,6 +70,8 @@ class IdentityFetcher:
             u for u in (validate_source_url(s, allow_private) for s in seed_nodes) if u
         ]
         self._fetch: FetchFn = fetch or self._default_fetch
+        self._lan_fetch: FetchFn = lan_fetch or self._default_lan_fetch
+        self.lan = None    # LanSources: nodes found by mDNS on a network we are attached to (opt-in)
         self._on_update = on_update
         self._clock = clock
         self._task: asyncio.Task | None = None
@@ -80,6 +83,9 @@ class IdentityFetcher:
 
     async def _default_fetch(self, base_url: str, identity_hash: str):
         return await http_fetch_sigchain(base_url, identity_hash, self._allow_private)
+
+    async def _default_lan_fetch(self, base_url: str, identity_hash: str):
+        return await http_fetch_sigchain(base_url, identity_hash, True)   # the address was vetted by LanSources
 
     # --- scheduling --------------------------------------------------------
 
@@ -256,6 +262,20 @@ class IdentityFetcher:
             if self._satisfied(identity_hash, want_head):
                 break
             error = f"{source}: chain is older than required"
+
+        # Nodes on the local network (found by mDNS, if switched on), then email
+        if self.lan is not None and not self._satisfied(identity_hash, want_head):
+            for source in self.lan.urls():
+                try:
+                    events = await self._lan_fetch(source, identity_hash)
+                except Exception as e:
+                    error = f"lan {type(e).__name__}"
+                    continue
+                if events and self._ingest(identity_hash, events):
+                    updated = True
+                if self._satisfied(identity_hash, want_head):
+                    break
+                error = "lan: no newer chain"
 
         # Last resort: ask by email. The answer comes later through deliver(); this attempt only sends the request.
         if self.mail is not None and not self._satisfied(identity_hash, want_head):

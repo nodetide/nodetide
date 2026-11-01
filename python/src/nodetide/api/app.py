@@ -64,6 +64,9 @@ async def on_startup(app: web.Application) -> None:
     if app.get("relay_poller"):
         await app["relay_poller"].start()
 
+    if app.get("lan_sources"):
+        await app["lan_sources"].start()
+
     # Answer chain requests that arrive by email
     if app.get("mail_poller"):
         await app["mail_poller"].start()
@@ -79,6 +82,9 @@ async def on_cleanup(app: web.Application) -> None:
     """Called on application cleanup."""
     if app.get("mail_poller"):
         await app["mail_poller"].stop()
+
+    if app.get("lan_sources"):
+        await app["lan_sources"].stop()
 
     # Stop mDNS announcement
     if app.get("relay_mdns"):
@@ -171,7 +177,8 @@ def create_app(
     mdns = mdns or os.environ.get("NODETIDE_MDNS") == "1"
     if mdns:
         from nodetide.relay import RelayMDNS
-        app["relay_mdns"] = RelayMDNS(port=port)
+        ids = [h.strip() for h in os.environ.get("NODETIDE_MDNS_IDENTITIES", "").split(",") if h.strip()]
+        app["relay_mdns"] = RelayMDNS(port=port, identities=ids)
         logger.info(f"mDNS announcement enabled (port={port})")
 
     # Health check endpoint
@@ -205,6 +212,14 @@ def create_app(
     if oidc_config is not None:
         setup_oidc(app, oidc_config, app["storage"], fetch=oidc_fetch)
         logger.info(f"OIDC bridge enabled (issuer={oidc_config.issuer})")
+
+    # Nodes on the local network as a last-resort chain source (off unless NODETIDE_MDNS_DISCOVER=1)
+    if os.environ.get("NODETIDE_MDNS_DISCOVER") == "1" and app.get("oidc") is not None:
+        from nodetide.relay import RelayDiscovery
+        from nodetide.relay.lan import LanSources
+        app["lan_sources"] = LanSources(RelayDiscovery())
+        app["oidc"].fetcher.lan = app["lan_sources"]
+        logger.info("Local-network node discovery enabled as a chain source")
 
     # Email responder (off unless NODETIDE_MAIL_RESPONDER=1)
     from nodetide.mailresponder import config as mail_config

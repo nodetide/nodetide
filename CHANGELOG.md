@@ -3,6 +3,12 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (mDNS)
+
+- **LAN discovery connected** (`lan-discovery.md`): the announcement now carries `scheme` and, if the operator chooses (`NODETIDE_MDNS_IDENTITIES`), up to 3 identity hashes; `nodetide relay discover` shows them. With
+  `NODETIDE_MDNS_DISCOVER=1` the identity fetcher uses nodes found on the LAN as a source after the internet and before email, only at addresses on networks the machine is attached to (never itself, loopback,
+  the metadata address or multicast; max 8; fixed read-only request). Tests include a real announce/discover round trip (`NODETIDE_MDNS_TESTS=1`). Android browsing is not done.
+
 ## 2026-11-02 (mailto: distribution points)
 
 - **The CLI and the node read `mailto:` distribution points** (`email-distribution.md`, "Reading mailto: points"). A `mailto:` point is one plain address; anything with headers, names, lists or escapes is refused,
