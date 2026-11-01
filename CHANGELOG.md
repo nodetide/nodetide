@@ -3,6 +3,14 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Android release signing)
+
+- **Play release pipeline**: `android-release.yml` builds the signed bundle from a tag `android-v*` (or by hand) in the `production` environment (required reviewer, tags only), checks the bundle is signed by the
+  registered upload certificate, checks 16 KB support, attaches it to the GitHub release and, once switched on (`PLAY_UPLOAD=true`), uploads it to Play as a draft on the internal track.
+  Gradle signs with an **upload key** read from environment variables (Play App Signing keeps the real signing key); without them the release build is unsigned, so ordinary CI is unchanged.
+  `versionCode` comes from the run number. `android/tools/setup-release.sh OWNER/REPO TAG_PATTERN` is run once on the owner's machine: it generates the keystore and passwords locally, creates the
+  environment, and stores secrets (keystore, password) and variables (alias, certificate SHA-256) in GitHub without them passing through anyone else.
+
 ## 2026-11-02 (Android accounts and key storage)
 
 - **Several accounts on one phone** (`AccountBook`, `AccountsScreen`): switch from the top bar, add (create, attach a device, watch), remove with a warning. The screens read "the current identity",

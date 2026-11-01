@@ -71,3 +71,10 @@ lint/intermediates/
 lint/generated/
 lint/outputs/
 lint/tmp/
+
+# Signing keys never belong in the repository
+*.jks
+*.keystore
+*.p12
+upload-cert.pem
+passwords.txt
