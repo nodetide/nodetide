@@ -8,7 +8,7 @@ still open, so a new session can pick up without re-deriving context.
 - **A short, signed snapshot of an identity's current state in DNS** (`state-record.md`): master key, active devices, head and content commitment, signed by the master key and tied to the identity by its genesis
   and master rotations (about 1.2 KB, independent of chain length). `nodetide identity dns-record` prints the TXT record for a `dns:` distribution point. Native auth accepts an assertion against a state when
   there is no chain or the stored one is behind (supplied by the caller, found in DNS via the chain's `dns:` point, or at a domain the caller names); `verify_assertion` was split so both paths share their checks.
-  Organizations and identities with social recovery cannot publish a state (they need other chains). Python only for now. Checked against the live resolver on our zone (multi-string TXT, absent names).
+  Organizations and identities with social recovery cannot publish a state (they need other chains). The web client's **My Identity** tab makes the record (domain, validity, zone-file line, copy buttons, the devices it lists); a headless-Chrome test verifies the browser's output with Python. Checked against the live resolver on our zone (multi-string TXT, absent names).
 
 ## 2026-11-02 (Android: finding a node on the LAN)
 

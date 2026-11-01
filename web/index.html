@@ -25,6 +25,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.min.js"></script>
 
   <!-- App -->
+  <script src="/js/state-record.js"></script>
   <script src="/js/app.js"></script>
 
   <style>
@@ -1079,6 +1080,58 @@
           </p>
         </div>
       </div>
+        <div class="card" x-data="stateRecordUI" x-show="$store.identity.activeHash" x-effect="$store.identity.activeHash; $store.wallet.unlocked; prepare()">
+          <div class="card-header">
+            <span class="card-title">DNS state record</span>
+          </div>
+          <p class="text-small text-muted">
+            A short, signed snapshot of who may act for this identity <em>now</em> (your master key, active devices and chain head), to publish as one DNS TXT record.
+            Anyone can then check a sign-in against it without downloading your whole chain. DNS itself needs no trust: the record is signed by your master key.
+            It expires, so republish it whenever your devices change.
+          </p>
+          <p class="text-small" x-show="!$store.wallet.unlocked" style="color: var(--warning, #b26a00)">Unlock your wallet above to make a record: it is signed with your master key.</p>
+          <form @submit.prevent="generate" x-show="$store.wallet.unlocked">
+            <div class="form-group">
+              <label>Your domain</label>
+              <input type="text" x-model="domain" placeholder="example.org" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <div class="form-group">
+              <label>Valid for</label>
+              <select x-model.number="days">
+                <option value="1">1 day</option>
+                <option value="7">7 days</option>
+                <option value="30">30 days</option>
+              </select>
+              <small class="text-muted">A longer record is easier to keep up, but a device you revoke stays accepted until it expires.</small>
+            </div>
+            <button type="submit" class="btn" :disabled="$store.app.loading">Make the record</button>
+          </form>
+          <template x-if="result">
+            <div class="mt-1">
+              <div class="form-group">
+                <label>Add this TXT record to your DNS zone (<span x-text="result.size"></span> characters)</label>
+                <textarea readonly rows="5" x-model="result.zone" style="font-family: monospace; font-size: 0.75rem; width: 100%" @focus="$event.target.select()"></textarea>
+                <div class="flex" style="gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap">
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.zone, 'Zone line copied')">Copy zone line</button>
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.value, 'Value copied')">Copy value only</button>
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.name, 'Name copied')">Copy name</button>
+                </div>
+              </div>
+              <div class="text-small" x-show="!result.hasPoint">
+                Also add <code x-text="'dns:' + result.domain"></code> to your distribution points (Distribution Points, Edit), so others know where to look.
+              </div>
+              <div class="text-small text-muted mt-1">
+                This record lists <span x-text="result.devices.length"></span> device<span x-show="result.devices.length !== 1">s</span> that may act for you.
+                Check they are yours:
+                <template x-for="d in result.devices" :key="d.pubkey">
+                  <div><code x-text="d.pubkey.slice(0, 16) + '...'"></code> <span x-text="d.label || 'unnamed'"></span> (<span x-text="d.capabilities.join(', ')"></span>)</div>
+                </template>
+                Valid until <span x-text="result.until"></span>.
+              </div>
+            </div>
+          </template>
+        </div>
+
         <div class="card" x-data="protectionUI" x-show="$store.identity.activeHash" x-init="fetchRequest(true); loadOrgs()"
              x-effect="$store.identity.activeHash; loadOrgs()">
           <div class="card-header">

@@ -1374,6 +1374,31 @@
     },
 
     // ---- verification service ----
+    async stateRecord(hash, domainInput, days) {
+      /** The DNS TXT record for this identity's current state, signed with the master key (state-record.md). */
+      const s = this.session(hash);
+      const domain = NodetideState.normalizeDomain(domainInput);
+      if (!domain) throw new Error('Enter a public domain name, like example.org');
+      if (!Number.isInteger(days) || days < 1 || days > 90) throw new Error('Choose how long the record stays valid');
+      const chain = await this.chain(hash);
+      const info = await api.request('GET', `/identities/${hash}`);
+      const now = Math.floor(Date.now() / 1000);
+      const doc = await NodetideState.build({
+        identityHash: hash, events: chain.events, commitment: chain.commitment, devices: info.devices || [], master: s.master,
+        now, validity: days * 86400, canonicalize, sha256: v => sha256(v), sign: (m, k) => Crypto.sign(m, k),
+      });
+      const value = await NodetideState.encode(doc, canonicalize);
+      const name = NodetideState.recordName(domain, hash);
+      const points = SigchainUtils.getLatestField(chain.events, 'distribution_points', []);
+      const labels = new Map((info.devices || []).map(d => [d.pubkey, d.label]));
+      return {
+        domain, name, value, size: value.length, zone: NodetideState.zoneLine(name, value),
+        hasPoint: points.some(p => NodetideState.normalizeDomain(p) === domain && /^dns:/i.test(p)),
+        devices: doc.body.devices.map(d => ({ pubkey: d.k, capabilities: d.c, label: labels.get(d.k) || '' })),
+        until: new Date(doc.body.exp * 1000).toLocaleString(),
+      };
+    },
+
     async verifierUrl() {
       const own = Settings.get('verifierUrl', '');
       if (own) return own.replace(/\/+$/, '');
@@ -2066,6 +2091,44 @@
     }));
 
     // Backup and recovery dialogs (opened from the banner)
+    // DNS state record: generated here, signed by the master key held in the unlocked wallet
+    Alpine.data('stateRecordUI', () => ({
+      domain: '',
+      days: 7,
+      result: null,
+      hash: null,
+
+      async prepare() {
+        const hash = Alpine.store('identity').activeHash;
+        if (!hash) return;
+        if (hash !== this.hash) { this.hash = hash; this.result = null; this.domain = ''; }
+        if (this.domain) return;
+        try {
+          const chain = await Wallet.chain(hash);
+          const points = SigchainUtils.getLatestField(chain.events, 'distribution_points', []);
+          const first = points.find(p => /^dns:/i.test(p) && NodetideState.normalizeDomain(p));
+          if (first) this.domain = NodetideState.normalizeDomain(first);
+        } catch { /* the node cannot be asked right now: leave it empty */ }
+      },
+
+      async generate() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          this.result = await Wallet.stateRecord(Alpine.store('identity').activeHash, this.domain, this.days);
+        } catch (e) {
+          this.result = null;
+          app.showError(e.message);
+        } finally {
+          app.loading = false;
+        }
+      },
+
+      async copy(text, done) {
+        try { await navigator.clipboard.writeText(text); Alpine.store('app').showSuccess(done); } catch { Alpine.store('app').showError('Could not copy: select the text and copy it by hand'); }
+      },
+    }));
+
     Alpine.data('protectionUI', () => ({
       backup: { identityPassword: '', password: '', confirm: '' },
       recovery: { identityPassword: '', trustees: '', threshold: 2 },

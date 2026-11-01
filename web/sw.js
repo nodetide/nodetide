@@ -2,11 +2,12 @@
  * Service Worker - offline support for Nodetide web client
  */
 
-const CACHE_NAME = 'nodetide-v8';
+const CACHE_NAME = 'nodetide-v9';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/js/app.js',
+  '/js/state-record.js',
   '/manifest.json',
   '/icon.svg',
 ];

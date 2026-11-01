@@ -35,9 +35,16 @@ full hash is inside the record and checked). Whoever controls the domain publish
 
 ## Use
 
-* **Publish:** `nodetide identity set-distribution -d dns:example.org`, then `nodetide identity dns-record` prints the name and the quoted TXT strings (or `--json`). Republish when devices change and
+* **Publish:** in the web client, **My Identity > DNS state record** (unlock the wallet, enter the domain, choose how long it is valid): it shows the zone-file line, copy buttons, and the list of devices
+  the record lists so you can check they are yours. Or from the CLI: `nodetide identity set-distribution -d dns:example.org`, then `nodetide identity dns-record` prints the name and the quoted TXT strings (or `--json`). Republish when devices change and
   before `exp`. Automate it with whatever manages the zone.
 * **Node (native auth, `/api/auth/verify` and `/login`):** when there is no chain for the signer, or the stored one is behind (`unknown_chain_head`), the node checks the assertion against a state: one the
   caller supplies (`"state": {...}`), else the one in DNS at a `dns:` point of the identity's own chain, else at a domain the caller names (`"dns": "example.org"`). The assertion's `chain_head` must equal
   the state's head. The stored chain is never changed by this.
 * **Limits of the reader:** TXT lookups only, 5 s timeout, up to 8 records examined, results cached for 60 s, only plain public domain names (no IP literals, `.local`, `.internal` and the like).
+
+## The web client
+
+`web/js/state-record.js` builds the record in the browser (canonical JSON, deflate through `CompressionStream`, the master key from the unlocked wallet) and has no dependencies, so a browser test
+checks its output with Python's verifier (`tests/test_web_state_record_browser.py`). The chain events, head and Merkle commitment are computed in the browser from the chain the node serves; the device list is
+the node's, which is why the card lists the devices for the user to check before the record is published.
