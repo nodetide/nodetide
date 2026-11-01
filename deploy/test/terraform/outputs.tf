@@ -31,3 +31,8 @@ output "urls" {
 output "dns_managed" {
   value = var.dns_zone != ""
 }
+
+output "dns_nameservers" {
+  description = "Set these as the domain's nameservers at the registrar (only when create_dns_zone is on)."
+  value       = var.dns_zone != "" && var.create_dns_zone ? hcloud_zone.managed[0].authoritative_nameservers.assigned : []
+}

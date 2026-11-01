@@ -41,6 +41,7 @@ env:
   TF_VAR_ssh_public_key: ${{ vars.DEPLOY_SSH_PUBLIC_KEY }}
   TF_VAR_domain: ${{ vars.TEST_DOMAIN }}
   TF_VAR_dns_zone: ${{ vars.TEST_DNS_ZONE }}
+  TF_VAR_create_dns_zone: ${{ vars.TEST_CREATE_DNS_ZONE || 'false' }}
 
 jobs:
   terraform:

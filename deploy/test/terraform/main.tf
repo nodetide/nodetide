@@ -26,7 +26,9 @@ module "placement" {
 
 locals {
   labels = merge({ project = "nodetide", stack = "test", managed-by = "terraform" }, var.labels)
-  hosts  = var.domain == "" ? [] : ["nt-node", "nt-rp", "nt-wallet"]
+  hosts  = var.domain == "" ? [] : ["nt-node", "nt-rp", "nt-wallet", "nt-grafana", "nt-verifier"]
+  # the zone: created here (create_dns_zone) or an existing one
+  zone_name = var.dns_zone == "" ? "" : (var.create_dns_zone ? hcloud_zone.managed[0].name : data.hcloud_zone.this[0].name)
 }
 
 resource "hcloud_ssh_key" "deploy" {
@@ -107,15 +109,25 @@ resource "hcloud_server" "stack" {
   }
 }
 
+# The registrar only has to delegate the domain to Hetzner's nameservers once (see the `dns_nameservers` output);
+# every record after that is managed here.
+resource "hcloud_zone" "managed" {
+  count  = var.dns_zone != "" && var.create_dns_zone ? 1 : 0
+  name   = var.dns_zone
+  mode   = "primary"
+  ttl    = 3600
+  labels = local.labels
+}
+
 data "hcloud_zone" "this" {
-  count = var.dns_zone == "" ? 0 : 1
+  count = var.dns_zone != "" && !var.create_dns_zone ? 1 : 0
   name  = var.dns_zone
 }
 
 resource "hcloud_zone_rrset" "a" {
   for_each = var.dns_zone == "" ? toset([]) : toset(local.hosts)
 
-  zone = data.hcloud_zone.this[0].name
+  zone = local.zone_name
   name = trimsuffix("${each.key}.${var.domain}", ".${var.dns_zone}")
   type = "A"
   ttl  = 300
@@ -126,7 +138,7 @@ resource "hcloud_zone_rrset" "a" {
 resource "hcloud_zone_rrset" "aaaa" {
   for_each = var.dns_zone == "" ? toset([]) : toset(local.hosts)
 
-  zone = data.hcloud_zone.this[0].name
+  zone = local.zone_name
   name = trimsuffix("${each.key}.${var.domain}", ".${var.dns_zone}")
   type = "AAAA"
   ttl  = 300

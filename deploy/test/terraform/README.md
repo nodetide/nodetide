@@ -41,6 +41,7 @@ wait for an approval click.
 | secret | `DEPLOY_SSH_PRIVATE_KEY` | private half (only for `deploy_app`) | see below |
 | variable | `TEST_DOMAIN` | FQDN without trailing dot, e.g. `test.example.org`; the hosts become `nt-node.<it>`, `nt-rp.<it>`, `nt-wallet.<it>` (optional for plan/apply; required for `deploy_app`) | your domain |
 | variable | `TEST_DNS_ZONE` | Hetzner DNS zone that is `TEST_DOMAIN` itself or a parent of it, e.g. `example.org` (optional: empty = create the DNS records yourself) | Hetzner Console -> DNS |
+| variable | `TEST_CREATE_DNS_ZONE` | `true` = Terraform creates the zone named in `TEST_DNS_ZONE` (the apply prints `dns_nameservers`: set those at the registrar once, e.g. for a registrar without an API) | |
 
 Commands (with the `gh` CLI, run once):
 

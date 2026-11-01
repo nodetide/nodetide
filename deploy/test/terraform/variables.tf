@@ -16,6 +16,12 @@ variable "dns_zone" {
   default     = ""
 }
 
+variable "create_dns_zone" {
+  description = "Create the Hetzner DNS zone `dns_zone` here instead of expecting it to exist (then delegate the domain to the nameservers in the dns_nameservers output)."
+  type        = bool
+  default     = false
+}
+
 variable "server_type_preference" {
   description = "Server types in order of preference. The first one actually in stock in an acceptable location is used."
   type        = list(string)
