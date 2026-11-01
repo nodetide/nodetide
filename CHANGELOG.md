@@ -26,6 +26,12 @@ still open, so a new session can pick up without re-deriving context.
 - **No public wallet**: the Caddy route, DNS record (`nt-wallet`) and the node's wallet link are gone; the OIDC page offers the web client. The old
   server-side wallet is the opt-in compose profile `hosted-wallet` (127.0.0.1:4572, ssh tunnel), still used by `smoke.py` and for the eID statement flow.
 
+- **Passkey unlock** (`Passkey` in `web/js/app.js`): "Use a passkey" in the Wallet view makes a WebAuthn credential with the PRF extension and wraps the identity
+  password under HKDF(PRF(salt)) (AES-GCM); "Unlock with passkey" in the wallet and sign-in views unwraps it (user verification required). The password stays
+  the root secret and the fallback, the wrapped copy lives only in this browser's storage, and removing the passkey deletes it. The RP id is the page's host name
+  (a passkey does not follow the site to another domain). Tested with a CDP virtual authenticator (`test_passkey_unlocks_the_wallet`). Not a signing key: the
+  protocol's keys are still Ed25519 and the backup file remains the safety net.
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.

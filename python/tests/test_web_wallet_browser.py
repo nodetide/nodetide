@@ -206,3 +206,76 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
             chrome.terminate()
         await node.close()
         await verifier_server.close()
+
+
+async def test_passkey_unlocks_the_wallet():
+    """A virtual authenticator with the PRF extension stands in for Touch ID / a security key."""
+    node = TestServer(create_app(storage=Storage.memory(), web_root=str(WEB)))
+    await node.start_server()
+    base = f"http://localhost:{node.port}"  # a WebAuthn RP id must be a domain name, not an IP address
+    chrome = None
+    try:
+        async with aiohttp.ClientSession() as http:
+            chrome = subprocess.Popen(
+                [CHROME, "--headless=new", f"--remote-debugging-port={CDP_PORT}", f"--user-data-dir={tempfile.mkdtemp()}",
+                 "--no-first-run", "--disable-gpu", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            tabs = None
+            for _ in range(50):
+                try:
+                    async with http.get(f"http://127.0.0.1:{CDP_PORT}/json") as r:
+                        tabs = await r.json()
+                        break
+                except aiohttp.ClientError:
+                    await asyncio.sleep(0.2)
+            tab = next(t for t in tabs if t["type"] == "page")
+            async with http.ws_connect(tab["webSocketDebuggerUrl"]) as ws:
+                page = Page(ws)
+                await page.call("Runtime.enable")
+                await page.call("Page.enable")
+                await page.call("WebAuthn.enable")
+                await page.call("WebAuthn.addVirtualAuthenticator", options={
+                    "protocol": "ctap2", "transport": "internal", "hasResidentKey": True, "hasUserVerification": True,
+                    "isUserVerified": True, "hasPrf": True, "automaticPresenceSimulation": True})
+
+                async def load():
+                    await page.call("Page.navigate", url=base + "/")
+                    for _ in range(100):
+                        if await page.js("!!(window.Alpine && Alpine.store('wallet'))", wait=False):
+                            break
+                        await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.5)
+
+                async def attempt(expr):
+                    await page.js("Alpine.store('app').error=null")
+                    await page.js(f"(async()=>{{{expr}}})()")
+                    return await page.js("Alpine.store('app').error")
+
+                wallet = comp("[x-data=walletUI]")
+                await load()
+                await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'pk',
+                    method:'password',password:'passkey-pass-12',confirmPassword:'passkey-pass-12',distributionPoints:''}};
+                    await m.createIdentity();}})()""")
+                await asyncio.sleep(1)
+                assert await page.js(f"{wallet}.canPasskey") is True and await page.js(f"{wallet}.hasPasskey") is False
+                assert await attempt(f"const c={wallet}; c.password='passkey-pass-12'; await c.unlock();") is None
+                assert await attempt(f"await {wallet}.addPasskey();") is None
+                assert await page.js(f"{wallet}.hasPasskey") is True
+                stored = await page.js("localStorage.getItem('nodetide_identities')")
+                assert "passkey-pass-12" not in stored and '"passkey"' in stored  # the password is only there wrapped
+
+                await load()  # keys leave memory
+                assert await page.js("Alpine.store('wallet').unlocked") is False
+                assert await attempt(f"await {wallet}.unlockWithPasskey();") is None
+                assert await page.js("Alpine.store('wallet').unlocked") is True
+
+                # the password still works, and removing the passkey takes the shortcut away
+                await load()
+                assert await attempt(f"const c={wallet}; c.password='passkey-pass-12'; await c.unlock();") is None
+                await page.js(f"{wallet}.removePasskey()")
+                await load()
+                assert await page.js(f"{wallet}.hasPasskey") is False
+                assert "No passkey" in await attempt(f"await {wallet}.unlockWithPasskey();")
+    finally:
+        if chrome:
+            chrome.terminate()
+        await node.close()

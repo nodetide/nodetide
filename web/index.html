@@ -1144,6 +1144,7 @@
             <input type="password" x-model="password" autocomplete="current-password" required>
           </div>
           <button type="submit" class="btn" :disabled="$store.app.loading">Unlock</button>
+          <button type="button" class="btn btn-secondary" x-show="hasPasskey" @click="unlockWithPasskey()" :disabled="$store.app.loading">Unlock with passkey</button>
         </form>
       </div>
       <div class="card" x-show="unlocked && preview">
@@ -1198,6 +1199,8 @@
             <input type="password" x-model="password" autocomplete="current-password" required>
           </div>
           <button type="submit" class="btn" :disabled="$store.app.loading">Unlock</button>
+          <button type="button" class="btn btn-secondary" x-show="hasPasskey && canPasskey" @click="unlockWithPasskey()"
+                  :disabled="$store.app.loading" data-testid="unlock-passkey">Unlock with passkey</button>
         </form>
       </div>
 
@@ -1205,7 +1208,11 @@
         <div class="card">
           <div class="card-header">
             <span class="card-title">Claims</span>
-            <button class="btn btn-small btn-secondary" @click="lock()">Lock</button>
+            <span>
+              <button class="btn btn-small btn-secondary" x-show="canPasskey && !hasPasskey" @click="addPasskey()" :disabled="$store.app.loading">Use a passkey</button>
+              <button class="btn btn-small btn-secondary" x-show="hasPasskey" @click="removePasskey()">Remove passkey</button>
+              <button class="btn btn-small btn-secondary" @click="lock()">Lock</button>
+            </span>
           </div>
           <p class="text-muted text-small" x-show="claims.length === 0">No claims yet. Add an email address or a phone number below.</p>
           <template x-for="c in claims" :key="c.id">

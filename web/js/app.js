@@ -359,6 +359,11 @@
       }
     },
 
+    updateIdentity(identityHash, patch) {
+      const identities = this.listIdentities().map(i => (i.identityHash === identityHash ? { ...i, ...patch } : i));
+      localStorage.setItem(STORAGE_KEYS.IDENTITIES, JSON.stringify(identities));
+    },
+
     _saveIdentity(identity) {
       const identities = this.listIdentities();
       identities.push(identity);
@@ -828,6 +833,95 @@
   };
 
   // ============================================
+  // PASSKEY: unlock this browser's wallet with a WebAuthn authenticator instead of typing the password
+  // ============================================
+  // The identity password stays the root secret (and the fallback). With a passkey it is stored wrapped under a key
+  // the authenticator derives with the WebAuthn PRF extension: an AES-GCM key from HKDF(PRF(salt)). Whoever has only
+  // the browser's storage cannot unwrap it; unwrapping needs this authenticator and its user verification (Touch ID,
+  // PIN, ...). A synced passkey (iCloud Keychain, 1Password, ...) carries the PRF secret to the user's other devices,
+  // but the wrapped password lives only in this browser: the passkey is a convenience, the backup file is the safety net.
+
+  const Passkey = {
+    INFO: 'nodetide-passkey-unlock-v1',
+
+    supported() { return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create); },
+
+    _b64(bytes) { return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); },
+    _unb64(text) {
+      const pad = text.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((text.length + 3) % 4);
+      return Uint8Array.from(atob(pad), c => c.charCodeAt(0));
+    },
+
+    async _key(prfOutput) {
+      const base = await crypto.subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveKey']);
+      return crypto.subtle.deriveKey(
+        { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode(this.INFO) },
+        base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    },
+
+    async _prf(credentialId, saltBytes) {
+      const assertion = await navigator.credentials.get({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: window.location.hostname,
+        allowCredentials: [{ type: 'public-key', id: credentialId }],
+        userVerification: 'required',
+        extensions: { prf: { eval: { first: saltBytes } } },
+        timeout: 60000,
+      } });
+      const results = assertion.getClientExtensionResults().prf;
+      if (!results || !results.results || !results.results.first) {
+        throw new Error('This passkey cannot derive a key (no PRF support); the password still works');
+      }
+      return results.results.first;
+    },
+
+    async enroll(identityHash, password) {
+      /** Make a passkey for this identity and wrap the (already verified) password under it. */
+      if (!this.supported()) throw new Error('This browser has no passkey support');
+      const identity = KeyStore.getIdentity(identityHash);
+      await KeyStore._unlockBoth(identity, password); // refuse a wrong password before storing it
+      const created = await navigator.credentials.create({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { id: window.location.hostname, name: 'Nodetide' },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: identity.name || identityHash.slice(0, 12), displayName: identity.name || 'Nodetide identity' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+        extensions: { prf: {} },
+        timeout: 60000,
+      } });
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const prf = await this._prf(created.rawId, salt); // some authenticators only evaluate PRF on get
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await this._key(prf), new TextEncoder().encode(password));
+      const passkey = { credentialId: this._b64(created.rawId), salt: this._b64(salt), iv: this._b64(iv), wrapped: this._b64(wrapped), createdAt: Date.now() };
+      KeyStore.updateIdentity(identityHash, { passkey });
+      return passkey;
+    },
+
+    async password(identityHash) {
+      /** The identity password, unwrapped by the authenticator (asks for the user's verification). */
+      const identity = KeyStore.getIdentity(identityHash);
+      const p = identity && identity.passkey;
+      if (!p) throw new Error('No passkey is set up for this identity');
+      let prf;
+      try {
+        prf = await this._prf(this._unb64(p.credentialId), this._unb64(p.salt));
+      } catch (e) {
+        if (e.name === 'NotAllowedError') throw new Error('The passkey was not confirmed');
+        throw e;
+      }
+      try {
+        const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: this._unb64(p.iv) }, await this._key(prf), this._unb64(p.wrapped));
+        return new TextDecoder().decode(plain);
+      } catch {
+        throw new Error('The passkey did not match the stored data; use the password');
+      }
+    },
+
+    remove(identityHash) { KeyStore.updateIdentity(identityHash, { passkey: null }); },
+  };
+
+  // ============================================
   // WALLET: claims, verification and attestations, kept in this browser
   // ============================================
   // Nothing is held by a server. The claim values, attestations and verification state live in localStorage as one
@@ -886,6 +980,10 @@
       }
       WalletSession.set(hash, { master, device, password, data, identity });
       return data;
+    },
+
+    async unlockWithPasskey(hash) {
+      return this.unlock(hash, await Passkey.password(hash));
     },
 
     session(hash) {
@@ -1469,6 +1567,21 @@
         }
       },
 
+      get hasPasskey() { const i = Alpine.store('identity').activeIdentity; return !!(i && i.passkey); },
+
+      async unlockWithPasskey() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          await Wallet.unlockWithPasskey(this.hash);
+          await this.load();
+        } catch (e) {
+          app.showError('Could not unlock: ' + e.message);
+        } finally {
+          app.loading = false;
+        }
+      },
+
       async unlock() {
         const app = Alpine.store('app');
         app.loading = true;
@@ -1513,6 +1626,34 @@
 
       get hash() { return Alpine.store('identity').activeHash; },
       get unlocked() { return Alpine.store('wallet').unlocked; },
+      get hasPasskey() { const i = Alpine.store('identity').activeIdentity; return !!(i && i.passkey); },
+      get canPasskey() { return Passkey.supported(); },
+
+      async unlockWithPasskey() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          await Wallet.unlockWithPasskey(this.hash);
+          this.refresh();
+        } catch (e) {
+          app.showError('Could not unlock: ' + e.message);
+        } finally {
+          app.loading = false;
+        }
+      },
+
+      async addPasskey() {
+        await this.run('passkey', async () => {
+          await Passkey.enroll(this.hash, Wallet.session(this.hash).password);
+          Alpine.store('identity').reload();
+        }, 'Passkey added. You can unlock this wallet with it.');
+      },
+
+      async removePasskey() {
+        Passkey.remove(this.hash);
+        Alpine.store('identity').reload();
+        Alpine.store('app').showSuccess('Passkey removed from this browser. The password still works.');
+      },
 
       refresh() {
         const s = this.hash && WalletSession.get(this.hash);
