@@ -36,6 +36,9 @@ still open, so a new session can pick up without re-deriving context.
   and the passkey stands in (backup, recovery, organization approval, unlock). Those forms no longer show the "identity password" field at all when a passkey or
   an unlocked wallet can supply it (`protection.needsPassword`); they say who confirms instead.
 
+- A verifier whose owned issuer is not set up yet answers every API call with `503 {error: issuer_not_ready, message}` (CORS-readable) instead of 404, and the
+  browser wallet shows "The verification service is not ready yet: <reason>".
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.

@@ -76,3 +76,18 @@ def test_a_replaced_org_key_stops_this_server_until_it_has_the_new_key():
     db.save_sigchain(chain)
     with pytest.raises(IssuerNotReady, match="no longer the one"):
         load_owned(db, "V", org.identity_hash, None, owner.identity_hash)
+
+
+async def test_a_waiting_verifier_says_it_is_not_ready_instead_of_not_found():
+    from aiohttp.test_utils import TestClient, TestServer
+    from nodetide.verifiers.service import create_pending_app
+
+    app = create_pending_app({"name": "V"}, "NODETIDE_ISSUER_ORG is not set")
+    async with TestClient(TestServer(app)) as client:
+        for method, path in [("post", "/api/auth/challenge"), ("get", "/api/verify/issuer"), ("post", "/api/verify/email/start")]:
+            resp = await getattr(client, method)(path, headers={"Origin": "https://wallet.example"})
+            body = await resp.json()
+            assert resp.status == 503 and body["error"] == "issuer_not_ready" and "ISSUER_ORG" in body["message"]
+            assert resp.headers["Access-Control-Allow-Origin"] == "*"  # the browser can read the reason
+        assert (await client.get("/api/issuer/request")).status == 200
+        assert (await client.get("/health")).status == 200

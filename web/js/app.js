@@ -1157,7 +1157,8 @@
       if (!['email', 'phone'].includes(doc.claim_type)) throw new Error('Only email and phone claims are verified with a code');
       await this.ensureDeviceMayAuthenticate(hash);
       const challenge = await this.verifier('POST', '/api/auth/challenge', {});
-      if (challenge.status !== 201) throw new Error(`The verification service refused a challenge (${challenge.status})`);
+      if (challenge.status === 503) throw new Error('The verification service is not ready yet: ' + (challenge.json.message || 'its issuer is not set up'));
+      if (challenge.status !== 201) throw new Error(challenge.json.message || `The verification service refused a challenge (${challenge.status})`);
       const assertion = await this.assertion(hash, challenge.json, { purpose: 'claim_verification', claim_id: claimId });
       const { events } = await this.chain(hash);
       const started = await this.verifier('POST', `/api/verify/${doc.claim_type}/start`, { document: doc, assertion, sigchain: events });

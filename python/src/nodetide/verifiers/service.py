@@ -141,10 +141,28 @@ async def issuer_request(request: web.Request) -> web.Response:
     return web.json_response(request.app["issuer_request"])
 
 
+async def not_ready(request: web.Request) -> web.Response:
+    """Every other API call while the issuer is not set up: say so (503), not "not found"."""
+    return web.json_response(
+        {"error": "issuer_not_ready", "message": request.app["issuer_request"]["reason"]}, status=503,
+        headers={"Retry-After": "300"},
+    )
+
+
+def create_pending_app(body: dict, reason: str) -> web.Application:
+    app = web.Application(middlewares=[cors])
+    app["issuer_request"] = {**body, "status": "pending", "reason": reason}
+    app.router.add_get("/health", health)
+    app.router.add_get("/", issuer_request)
+    app.router.add_get("/api/issuer/request", issuer_request)
+    app.router.add_route("*", "/api/{tail:.*}", not_ready)
+    return app
+
+
 def run_pending(
     storage: Storage, name: str, owners: str | None, reason: str, host: str, port: int, governance: str | None = None,
 ) -> None:
-    """The issuer is owned but not founded yet: serve the founding request (and only that) until it is, then restart."""
+    """The issuer is owned but not founded yet: serve the founding request (and a clear 503 for the rest) until it is."""
     try:
         body = founding_request(storage, name, owners, governance)
     except IssuerNotReady as e:
@@ -152,12 +170,7 @@ def run_pending(
         reason = str(e)
     logger.warning("not issuing yet: %s", reason)
     logger.warning("founding request for the owners: %s", json.dumps(body))
-    app = web.Application(middlewares=[cors])
-    app["issuer_request"] = {**body, "status": "pending", "reason": reason}
-    app.router.add_get("/health", health)
-    app.router.add_get("/", issuer_request)
-    app.router.add_get("/api/issuer/request", issuer_request)
-    web.run_app(app, host=host, port=port, print=None)
+    web.run_app(create_pending_app(body, reason), host=host, port=port, print=None)
 
 
 def publish_issuer(verifier: CodeVerifier | NodeIssuer, target: str | None) -> None:
