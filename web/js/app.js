@@ -224,6 +224,7 @@
     IDENTITIES: 'nodetide_identities',
     ACTIVE_IDENTITY: 'nodetide_active_identity',
     SETTINGS: 'nodetide_settings',
+    PENDING_RECOVERY: 'nodetide_pending_recovery',
   };
 
   const StorageMethod = { PASSWORD: 'password', WEBAUTHN: 'webauthn' };
@@ -490,6 +491,122 @@
       event.signature = Crypto.sign(canonicalize(event), master.signing.secretKey);
       await api.submitEvent(identityHash, event);
       return event;
+    },
+
+    // --- Social recovery -------------------------------------------------------------------------------------
+    // Messages and records match python/src/nodetide/core/identity.py (recovery_message / sign_recovery).
+
+    _parseRecoveryCode(code) {
+      const m = /^([0-9a-f]{64}):(rec_[A-Za-z0-9_-]+)$/.exec((code || '').trim());
+      if (!m) throw new Error('A recovery code looks like <64 hex characters>:rec_...');
+      return { identityHash: m[1], recoveryId: m[2] };
+    },
+
+    async lookupRecovery(code) {
+      /** What a trustee needs to see before agreeing: whose identity, which new key, how far along. */
+      const { identityHash, recoveryId } = this._parseRecoveryCode(code);
+      const status = await api.request('GET', `/identities/${identityHash}/recovery/${recoveryId}`);
+      const info = await api.getIdentity(identityHash);
+      return { identityHash, recoveryId, name: info.name || '', status, trustees: (info.recovery && info.recovery.primary_trustees) || [] };
+    },
+
+    async trusteeSign(trusteeHash, password, code) {
+      /** Vouch for a recovery: sign (identity, chain head, new keys) with this trustee's master key. */
+      const seen = await this.lookupRecovery(code);
+      if (!seen.trustees.includes(trusteeHash)) throw new Error('This identity is not a trustee of that identity');
+      const trustee = this.getIdentity(trusteeHash);
+      if (!trustee || !trustee.encryptedMasterKeys) throw new Error('This browser does not hold the trustee identity\'s master key');
+      const { master } = await this._unlockBoth(trustee, password);
+      const chain = await api.request('GET', `/identities/${trusteeHash}/sigchain`);
+      const events = chain.events || [];
+      const state = await sha256(canonicalize(events[events.length - 1]));
+      const message = {
+        purpose: 'nodetide-social-recovery-v1',
+        identity: seen.identityHash,
+        prev: seen.status.prev,
+        new_pubkey: seen.status.new_master_pubkey,
+        new_encryption_pubkey: seen.status.new_encryption_pubkey,
+        trustee: trusteeHash,
+        state,
+      };
+      const record = {
+        trustee_identity: trusteeHash,
+        state,
+        key: master.signing.publicKey,
+        signature: Crypto.sign(canonicalize(message), master.signing.secretKey),
+      };
+      return api.request('POST', `/identities/${seen.identityHash}/recovery/${seen.recoveryId}/sign`, { record });
+    },
+
+    async startRecovery(identityHash, localPassword) {
+      /** Ask for a recovery with a brand-new master key; the code goes to the trustees. */
+      identityHash = (identityHash || '').trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(identityHash)) throw new Error('An identity hash is 64 hex characters');
+      if (!localPassword || localPassword.length < 8) throw new Error('Choose a password of at least 8 characters for this browser');
+      const info = await api.getIdentity(identityHash);
+      if (!info.recovery) throw new Error('That identity has no recovery set up');
+      const master = Crypto.generateKeyPair();
+      const started = await api.request('POST', `/identities/${identityHash}/recovery/initiate`, {
+        new_pubkey: master.signing.publicKey, new_encryption_pubkey: master.encryption.publicKey,
+      });
+      const pending = {
+        identityHash, recoveryId: started.recovery_id, newPubkey: master.signing.publicKey,
+        threshold: started.threshold, encryptedMaster: await Crypto.encryptWithPassword(master, localPassword),
+      };
+      localStorage.setItem(STORAGE_KEYS.PENDING_RECOVERY, JSON.stringify(pending));
+      return { code: `${identityHash}:${started.recovery_id}`, threshold: started.threshold };
+    },
+
+    pendingRecovery() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.PENDING_RECOVERY)); } catch { return null; }
+    },
+
+    async finishRecovery(localPassword) {
+      /** When enough trustees have signed: publish the recovery with the new key, add a device and keep the identity here. */
+      const pending = this.pendingRecovery();
+      if (!pending) throw new Error('No recovery is waiting in this browser');
+      const status = await api.request('GET', `/identities/${pending.identityHash}/recovery/${pending.recoveryId}`);
+      if (status.status !== 'complete') return { done: false, collected: status.collected, threshold: status.threshold };
+
+      let master;
+      try { master = await Crypto.decryptWithPassword(pending.encryptedMaster, localPassword); } catch { throw new Error('Invalid password'); }
+      const timestamp = Math.floor(Date.now() / 1000);
+      const recovery = {
+        version: 1, type: 'social_recovery', alg: 'ed25519', hash_alg: 'sha256', timestamp,
+        prev: status.prev, signed_by: master.signing.publicKey,
+        new_pubkey: master.signing.publicKey, new_encryption_pubkey: master.encryption.publicKey,
+        recovery_signatures: status.signatures.map(s => s.record),
+      };
+      recovery.signature = Crypto.sign(canonicalize(recovery), master.signing.secretKey);
+      await api.submitEvent(pending.identityHash, recovery);
+
+      const device = Crypto.generateKeyPair();
+      const addDevice = {
+        version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: timestamp + 1,
+        prev: await sha256(canonicalize(recovery)), signed_by: master.signing.publicKey,
+        device_pubkey: device.signing.publicKey, device_encryption_pubkey: device.encryption.publicKey,
+        label: 'Web Browser', capabilities: ['sign', 'encrypt', 'decrypt'], expires: null,
+      };
+      addDevice.signature = Crypto.sign(canonicalize(addDevice), master.signing.secretKey);
+      await api.submitEvent(pending.identityHash, addDevice);
+
+      const chain = await api.request('GET', `/identities/${pending.identityHash}/sigchain`);
+      const genesis = chain.events[0];
+      const identity = {
+        identityHash: pending.identityHash, name: genesis.name || '', createdAt: Date.now(),
+        storageMethod: StorageMethod.PASSWORD,
+        encryptedKeys: await Crypto.encryptWithPassword(device, localPassword),
+        encryptedMasterKeys: await Crypto.encryptWithPassword(master, localPassword),
+        signingPubkey: device.signing.publicKey, encryptionPubkey: device.encryption.publicKey,
+        masterSigningPubkey: master.signing.publicKey, distributionPoints: genesis.distribution_points || null,
+        genesisEvent: genesis, addDeviceEvent: addDevice,
+      };
+      const others = this.listIdentities().filter(i => i.identityHash !== identity.identityHash);
+      localStorage.setItem(STORAGE_KEYS.IDENTITIES, JSON.stringify([...others, identity]));
+      localStorage.removeItem(STORAGE_KEYS.PENDING_RECOVERY);
+      // Recovery restores control, not the stored claim values: a fresh backup is needed again
+      ProtectionState.save(identity.identityHash, { backupAt: null });
+      return { done: true, identity };
     },
 
     async dumpIdentity(identityHash, password) {
@@ -871,6 +988,8 @@
       recoveryChecked: false,
       showBackup: false,
       showRecovery: false,
+      showHelp: false,
+      showLost: false,
 
       init() { this.refresh(); },
 
@@ -918,6 +1037,69 @@
           Alpine.store('app').showSuccess('Backup downloaded. Keep the file and its password apart, away from this computer.');
         } catch (e) {
           Alpine.store('app').showError('Backup failed: ' + e.message);
+        } finally {
+          Alpine.store('app').loading = false;
+        }
+      },
+
+      // Social recovery: a trustee vouching for someone, and the person who lost their keys
+      help: { code: '', password: '', seen: null },
+      lost: { identityHash: '', password: '', code: '', waiting: false, collected: 0, threshold: 0 },
+
+      async lookUp() {
+        try {
+          this.help.seen = await KeyStore.lookupRecovery(this.help.code);
+        } catch (e) {
+          this.help.seen = null;
+          Alpine.store('app').showError('Could not read that recovery: ' + e.message);
+        }
+      },
+
+      async vouch() {
+        const store = Alpine.store('protection');
+        Alpine.store('app').loading = true;
+        try {
+          const r = await KeyStore.trusteeSign(Alpine.store('identity').activeHash, this.help.password, this.help.code);
+          this.help = { code: '', password: '', seen: null };
+          store.showHelp = false;
+          Alpine.store('app').showSuccess(`Signed. ${r.collected} of ${r.threshold} trustees have signed so far.`);
+        } catch (e) {
+          Alpine.store('app').showError('Could not sign: ' + e.message);
+        } finally {
+          Alpine.store('app').loading = false;
+        }
+      },
+
+      async askForRecovery() {
+        Alpine.store('app').loading = true;
+        try {
+          const r = await KeyStore.startRecovery(this.lost.identityHash, this.lost.password);
+          this.lost.code = r.code;
+          this.lost.threshold = r.threshold;
+          this.lost.waiting = true;
+        } catch (e) {
+          Alpine.store('app').showError('Could not start the recovery: ' + e.message);
+        } finally {
+          Alpine.store('app').loading = false;
+        }
+      },
+
+      async checkRecovery() {
+        Alpine.store('app').loading = true;
+        try {
+          const r = await KeyStore.finishRecovery(this.lost.password);
+          if (!r.done) {
+            this.lost.collected = r.collected;
+            this.lost.threshold = r.threshold;
+            Alpine.store('app').showSuccess(`${r.collected} of ${r.threshold} trustees have signed.`);
+            return;
+          }
+          Alpine.store('identity').reload();
+          this.lost = { identityHash: '', password: '', code: '', waiting: false, collected: 0, threshold: 0 };
+          Alpine.store('protection').showLost = false;
+          Alpine.store('app').showSuccess('Control of the identity is restored with a new key. Make a new backup now.');
+        } catch (e) {
+          Alpine.store('app').showError('Recovery failed: ' + e.message);
         } finally {
           Alpine.store('app').loading = false;
         }

@@ -703,6 +703,76 @@
         </form>
       </div>
     </div>
+
+    <!-- Help someone recover (a trustee) -->
+    <div class="modal-backdrop" x-show="$store.protection.showHelp" x-cloak @click.self="$store.protection.showHelp = false">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">Help someone recover</span>
+          <button class="modal-close" @click="$store.protection.showHelp = false">&times;</button>
+        </div>
+        <p class="text-small text-muted mb-1">
+          Someone who named your active identity as a trustee has lost their keys and gave you a recovery code.
+          Before you sign, check with them in person or by a call that the request is really theirs.
+        </p>
+        <div class="form-group">
+          <label>Recovery code</label>
+          <input type="text" x-model="help.code" placeholder="64 hex characters, a colon, then rec_..." @change="lookUp()">
+        </div>
+        <template x-if="help.seen">
+          <div class="mb-1">
+            <p class="text-small">
+              Identity <strong x-text="help.seen.name || '(no name)'"></strong>
+              <span class="text-muted" x-text="help.seen.identityHash.slice(0, 16) + '...'"></span><br>
+              New key <code x-text="help.seen.status.new_master_pubkey.slice(0, 16) + '...'"></code><br>
+              <span x-text="help.seen.status.collected + ' of ' + help.seen.status.threshold + ' trustees have signed'"></span>
+            </p>
+            <div class="form-group">
+              <label>Your identity's password (signs with your master key)</label>
+              <input type="password" x-model="help.password" autocomplete="current-password">
+            </div>
+            <button class="btn" style="width: 100%" @click="vouch()" :disabled="$store.app.loading">I have checked it is them: sign</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- I lost my keys -->
+    <div class="modal-backdrop" x-show="$store.protection.showLost" x-cloak @click.self="$store.protection.showLost = false">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">I lost my keys</span>
+          <button class="modal-close" @click="$store.protection.showLost = false">&times;</button>
+        </div>
+        <template x-if="!lost.waiting">
+          <form @submit.prevent="askForRecovery">
+            <p class="text-small text-muted mb-1">
+              Your trustees restore control of your identity with a new key made in this browser. Claim values and
+              attestations are not part of it; those come back from a backup or another device.
+            </p>
+            <div class="form-group">
+              <label>Your identity hash</label>
+              <input type="text" x-model="lost.identityHash" placeholder="64 hex characters" required>
+            </div>
+            <div class="form-group">
+              <label>A password for this browser (at least 8 characters)</label>
+              <input type="password" x-model="lost.password" autocomplete="new-password" minlength="8" required>
+            </div>
+            <button type="submit" class="btn" style="width: 100%" :disabled="$store.app.loading">Ask my trustees</button>
+          </form>
+        </template>
+        <template x-if="lost.waiting">
+          <div>
+            <p class="text-small mb-1">
+              Send this code to your trustees. Each opens "Help someone recover", checks it is you, and signs.
+              <span x-text="lost.threshold"></span> are needed.
+            </p>
+            <textarea readonly rows="3" x-model="lost.code" onclick="this.select()"></textarea>
+            <button class="btn" style="width: 100%; margin-top: 0.75rem" @click="checkRecovery()" :disabled="$store.app.loading">Check for signatures and finish</button>
+          </div>
+        </template>
+      </div>
+    </div>
   </div>
 
   <!-- Main content -->
@@ -1233,6 +1303,10 @@
         <div class="flex gap-1 mb-1">
           <button class="btn" @click="openDumpModal">Dump Identity</button>
           <button class="btn btn-secondary" @click="openRestoreModal">Restore Identity</button>
+        </div>
+        <div class="flex gap-1 mb-1">
+          <button class="btn btn-secondary" @click="$store.protection.showLost = true">I lost my keys (recover with trustees)</button>
+          <button class="btn btn-secondary" @click="$store.protection.showHelp = true">Help someone recover</button>
         </div>
       </div>
 

@@ -142,6 +142,10 @@ def verify_event_signature(
     if sigchain is None:
         return False, "Sigchain required for non-genesis events"
 
+    # A recovery is signed by the NEW key; whether trustees backed it is checked with the whole chain
+    if event_type == "social_recovery" and signed_by == event.get("new_pubkey"):
+        return True, None
+
     current_master = sigchain.get_current_master_key()
 
     # Master key can do anything
@@ -246,7 +250,8 @@ class PendingRecovery:
     expires_at: int
     threshold: int
     trustees: list[str]
-    signatures: dict[str, dict[str, Any]] = field(default_factory=dict)  # trustee -> {signature, signed_at}
+    signatures: dict[str, dict[str, Any]] = field(default_factory=dict)  # trustee -> {signature, signed_at, record}
+    prev: str = ""  # the chain head the recovery follows; trustees sign it
 
     @property
     def is_expired(self) -> bool:
@@ -276,6 +281,7 @@ class RecoveryStore:
         threshold: int,
         trustees: list[str],
         expires_in: int = 86400,  # 24 hours default
+        prev: str = "",
     ) -> PendingRecovery:
         """Create a new pending recovery."""
         recovery_id = f"rec_{secrets.token_urlsafe(16)}"
@@ -291,6 +297,7 @@ class RecoveryStore:
             expires_at=now + expires_in,
             threshold=threshold,
             trustees=trustees,
+            prev=prev,
         )
 
         self._recoveries[recovery_id] = recovery
@@ -316,6 +323,7 @@ class RecoveryStore:
         recovery_id: str,
         trustee: str,
         signature: str,
+        record: dict[str, Any] | None = None,
     ) -> PendingRecovery | None:
         """Add a trustee signature to a recovery."""
         recovery = self.get(recovery_id)
@@ -332,6 +340,7 @@ class RecoveryStore:
         recovery.signatures[trustee] = {
             "signature": signature,
             "signed_at": int(time.time()),
+            "record": record,
         }
 
         return recovery

@@ -16,6 +16,7 @@ from nodetide.core.identity import (
     SigchainEvent,
     GenesisEvent,
     SocialRecoveryEvent,
+    check_recovery_signature,
 )
 from nodetide.core.storage import Storage
 from nodetide.core.trust import TrustGraph, TrustDelegation
@@ -265,6 +266,11 @@ async def submit_event(request: web.Request) -> web.Response:
         if not valid:
             return error_response(ErrorCode.INVALID_SIGCHAIN, err or "Invalid sigchain after append", 400)
 
+        if isinstance(event, SocialRecoveryEvent):
+            recovery_store = request.app["recovery_store"]
+            for pending in recovery_store.get_for_identity(identity_hash):
+                recovery_store.delete(pending.recovery_id)
+
         # Handle device key storage if requested
         if data.get("store_device_key") and data.get("device_private_key_encrypted"):
             # TODO: Store encrypted device key
@@ -423,8 +429,12 @@ async def initiate_recovery(request: web.Request) -> web.Response:
         if initiated_by and initiated_by not in all_trustees:
             return error_response(ErrorCode.FORBIDDEN, "Initiator not a trustee", 403)
 
+        if len(recovery_store.get_for_identity(identity_hash)) >= 5:
+            return error_response(ErrorCode.INVALID_REQUEST, "Too many pending recoveries for this identity", 429)
+
         # Create pending recovery
         recovery = recovery_store.create(
+            prev=sigchain.head_hash,
             identity=identity_hash,
             new_pubkey=new_pubkey,
             new_encryption_pubkey=new_encryption_pubkey,
@@ -442,6 +452,7 @@ async def initiate_recovery(request: web.Request) -> web.Response:
                 collected=0,
                 signatures=[],
                 expires_at=recovery.expires_at,
+                prev=recovery.prev,
             ).to_dict(),
             status=201,
         )
@@ -451,7 +462,12 @@ async def initiate_recovery(request: web.Request) -> web.Response:
 
 
 async def submit_recovery_signature(request: web.Request) -> web.Response:
-    """POST /identities/{hash}/recovery/{id}/sign - Submit trustee signature."""
+    """POST /identities/{hash}/recovery/{id}/sign - Submit a trustee's signature.
+
+    The node checks it against the trustee's chain and keeps it. Once enough trustees have signed, the status is
+    "complete" and carries the signature records; the recovering client builds the social_recovery event, signs it with
+    the new key and submits it like any other event (the node checks the trustees again then).
+    """
     storage: Storage = request.app["storage"]
     recovery_store: RecoveryStore = request.app["recovery_store"]
     identity_hash = request.match_info["hash"]
@@ -466,85 +482,55 @@ async def submit_recovery_signature(request: web.Request) -> web.Response:
 
     try:
         data = await request.json()
-
-        trustee_identity = data.get("trustee_identity")
-        signature = data.get("signature")
-
-        if not trustee_identity or not signature:
-            return error_response(ErrorCode.INVALID_REQUEST, "Missing trustee_identity or signature", 400)
-
-        if trustee_identity not in recovery.trustees:
-            return error_response(ErrorCode.FORBIDDEN, "Not a trustee for this identity", 403)
-
-        # TODO: Verify trustee signature against their sigchain
-
-        # Add signature
-        recovery = recovery_store.add_signature(recovery_id, trustee_identity, signature)
-        if not recovery:
-            return error_response(ErrorCode.INVALID_REQUEST, "Failed to add signature", 400)
-
-        # Check if threshold met
-        if recovery.is_complete:
-            # Create social recovery event
-            sigchain = storage.get_sigchain(identity_hash)
-            if sigchain:
-                recovery_sigs = [
-                    {"trustee_identity": t, "signature": s["signature"]}
-                    for t, s in recovery.signatures.items()
-                ]
-
-                # Create the event (unsigned - signatures are from trustees)
-                event = SocialRecoveryEvent(
-                    type=SocialRecoveryEvent.__dataclass_fields__["type"].default,
-                    timestamp=int(time.time()),
-                    prev=sigchain.head_hash,
-                    signature="",  # Not signed by master
-                    signed_by=recovery.new_pubkey,  # New master key
-                    new_pubkey=recovery.new_pubkey,
-                    new_encryption_pubkey=recovery.new_encryption_pubkey,
-                    recovery_signatures=recovery_sigs,
-                )
-
-                sigchain.append(event)
-                storage.save_sigchain(sigchain)
-
-                # Clean up recovery
-                recovery_store.delete(recovery_id)
-
-                return web.json_response(
-                    RecoveryStatusResponse(
-                        recovery_id=recovery_id,
-                        identity=identity_hash,
-                        status="complete",
-                        threshold=recovery.threshold,
-                        collected=recovery.collected,
-                        signatures=[
-                            {"trustee": t, "signed_at": s["signed_at"]}
-                            for t, s in recovery.signatures.items()
-                        ],
-                        expires_at=recovery.expires_at,
-                        new_master_pubkey=recovery.new_pubkey,
-                        event_hash=event.event_hash(),
-                    ).to_dict()
-                )
-
-        return web.json_response(
-            RecoveryStatusResponse(
-                recovery_id=recovery_id,
-                identity=identity_hash,
-                status="pending",
-                threshold=recovery.threshold,
-                collected=recovery.collected,
-                signatures=[
-                    {"trustee": t, "signed_at": s["signed_at"]}
-                    for t, s in recovery.signatures.items()
-                ],
-                expires_at=recovery.expires_at,
-            ).to_dict()
-        )
-
     except json.JSONDecodeError:
         return error_response(ErrorCode.INVALID_REQUEST, "Invalid JSON", 400)
+
+    record = data.get("record") if isinstance(data.get("record"), dict) else data
+    trustee_identity = record.get("trustee_identity")
+    signature = record.get("signature")
+    if not trustee_identity or not signature:
+        return error_response(ErrorCode.INVALID_REQUEST, "Missing trustee_identity or signature", 400)
+
+    if trustee_identity not in recovery.trustees:
+        return error_response(ErrorCode.FORBIDDEN, "Not a trustee for this identity", 403)
+
+    sigchain = storage.get_sigchain(identity_hash)
+    if sigchain is None or sigchain.head_hash != recovery.prev:
+        return error_response(ErrorCode.STALE_STATE, "The identity changed since this recovery was started", 409)
+
+    err = check_recovery_signature(
+        record, identity_hash, recovery.prev, recovery.new_pubkey, recovery.new_encryption_pubkey,
+        storage.get_sigchain, check_current=True,
+    )
+    if err:
+        return error_response(ErrorCode.INVALID_SIGNATURE, err, 400)
+
+    recovery = recovery_store.add_signature(
+        recovery_id, trustee_identity, signature,
+        {k: record[k] for k in ("trustee_identity", "state", "key", "signature")},
+    )
+    if not recovery:
+        return error_response(ErrorCode.INVALID_REQUEST, "Failed to add signature", 400)
+
+    return web.json_response(_recovery_status(recovery))
+
+
+def _recovery_status(recovery) -> dict:
+    return RecoveryStatusResponse(
+        recovery_id=recovery.recovery_id,
+        identity=recovery.identity,
+        status="complete" if recovery.is_complete else "pending",
+        threshold=recovery.threshold,
+        collected=recovery.collected,
+        signatures=[
+            {"trustee": t, "signed_at": s["signed_at"], "record": s.get("record")}
+            for t, s in recovery.signatures.items()
+        ],
+        expires_at=recovery.expires_at,
+        prev=recovery.prev,
+        new_master_pubkey=recovery.new_pubkey,
+        new_encryption_pubkey=recovery.new_encryption_pubkey,
+    ).to_dict()
 
 
 async def get_recovery_status(request: web.Request) -> web.Response:
@@ -560,20 +546,7 @@ async def get_recovery_status(request: web.Request) -> web.Response:
     if recovery.identity != identity_hash:
         return error_response(ErrorCode.NOT_FOUND, "Recovery not for this identity", 404)
 
-    return web.json_response(
-        RecoveryStatusResponse(
-            recovery_id=recovery_id,
-            identity=identity_hash,
-            status="complete" if recovery.is_complete else "pending",
-            threshold=recovery.threshold,
-            collected=recovery.collected,
-            signatures=[
-                {"trustee": t, "signed_at": s["signed_at"]}
-                for t, s in recovery.signatures.items()
-            ],
-            expires_at=recovery.expires_at,
-        ).to_dict()
-    )
+    return web.json_response(_recovery_status(recovery))
 
 
 async def list_pending_recoveries(request: web.Request) -> web.Response:
@@ -591,6 +564,8 @@ async def list_pending_recoveries(request: web.Request) -> web.Response:
                 "threshold": r.threshold,
                 "collected": r.collected,
                 "expires_at": r.expires_at,
+                "new_pubkey": r.new_pubkey,
+                "prev": r.prev,
             }
             for r in recoveries
         ]

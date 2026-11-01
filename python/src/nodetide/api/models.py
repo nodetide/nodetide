@@ -213,6 +213,8 @@ class RecoveryStatusResponse:
     expires_at: int
     new_master_pubkey: str | None = None
     event_hash: str | None = None
+    prev: str | None = None
+    new_encryption_pubkey: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -224,6 +226,10 @@ class RecoveryStatusResponse:
             "signatures": self.signatures,
             "expires_at": self.expires_at,
         }
+        if self.prev:
+            d["prev"] = self.prev
+        if self.new_encryption_pubkey:
+            d["new_encryption_pubkey"] = self.new_encryption_pubkey
         if self.new_master_pubkey:
             d["new_master_pubkey"] = self.new_master_pubkey
         if self.event_hash:

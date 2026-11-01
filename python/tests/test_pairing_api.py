@@ -133,3 +133,61 @@ async def test_organization_events_need_owner_approvals_and_the_node_checks_them
     assert info["verified"] is True
     # replaying the organization's genesis stays harmless
     assert (await client.post("/api/identities", json={"event": genesis.to_dict()})).status == 200
+
+
+async def test_social_recovery_through_the_node(client):
+    from nodetide.core.crypto import KeyPair
+    from nodetide.core.identity import Identity, SocialRecoveryEvent, sign_recovery
+    import json as _json
+
+    async def put(ident):
+        assert (await client.post("/api/identities", json={"event": ident.sigchain.to_list()[0]})).status == 201
+        for e in ident.sigchain.to_list()[1:]:
+            r = await client.post(f"/api/identities/{ident.identity_hash}/events", json={"event": e})
+            assert r.status == 201, await r.text()
+
+    me, a, b, c = (Identity.create(name=n) for n in "mabc")
+    for t in (a, b, c):
+        await put(t)
+    me.set_recovery([a.identity_hash, b.identity_hash, c.identity_hash], 2)
+    await put(me)
+
+    new = KeyPair.generate()
+    start = await client.post(f"/api/identities/{me.identity_hash}/recovery/initiate", json={
+        "new_pubkey": new.verify_key.to_hex(), "new_encryption_pubkey": new.public_encryption_key.to_hex()})
+    assert start.status == 201
+    st = await start.json()
+    rid, prev = st["recovery_id"], st["prev"]
+    assert prev == me.sigchain.head_hash
+
+    def sig(t, **over):
+        rec = sign_recovery(t.identity_hash, t.local_keypair, t.sigchain.head_hash, me.identity_hash, prev,
+                            new.verify_key.to_hex(), new.public_encryption_key.to_hex())
+        rec.update(over)
+        return rec
+
+    url = f"/api/identities/{me.identity_hash}/recovery/{rid}/sign"
+    assert (await client.post(url, json={"record": sig(a, signature="00" * 64)})).status == 400  # forged
+    stranger = Identity.create(name="s")
+    await put(stranger)
+    assert (await client.post(url, json={"record": sig(stranger)})).status == 403
+
+    r = await client.post(url, json={"record": sig(a)})
+    assert r.status == 200 and (await r.json())["status"] == "pending"
+    r = await client.post(url, json={"record": sig(c)})
+    done = await r.json()
+    assert done["status"] == "complete" and len(done["signatures"]) == 2
+
+    ev = SocialRecoveryEvent(
+        type=None, timestamp=1, prev=prev, signature="", signed_by=new.verify_key.to_hex(),
+        new_pubkey=new.verify_key.to_hex(), new_encryption_pubkey=new.public_encryption_key.to_hex(),
+        recovery_signatures=[s["record"] for s in done["signatures"]],
+    )
+    ev.signature = new.sign_hex(_json.dumps(ev.signable_dict(), sort_keys=True, separators=(",", ":")).encode())
+    # an event with a missing trustee signature is refused
+    bad = ev.to_dict(); bad["recovery_signatures"] = bad["recovery_signatures"][:1]
+    assert (await client.post(f"/api/identities/{me.identity_hash}/events", json={"event": bad})).status == 400
+    ok = await client.post(f"/api/identities/{me.identity_hash}/events", json={"event": ev.to_dict()})
+    assert ok.status == 201, await ok.text()
+    info = await (await client.get(f"/api/identities/{me.identity_hash}")).json()
+    assert info["master_pubkey"] == new.verify_key.to_hex() and info["verified"] is True

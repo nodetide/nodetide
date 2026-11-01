@@ -1025,6 +1025,112 @@ def approval_score(
     return approved, total, None
 
 
+# --- Social recovery ---------------------------------------------------------------------------------------------
+#
+# A social_recovery event replaces the master key without the old one. It is signed by the NEW key (proof that whoever
+# recovers holds it) and carries `recovery_signatures`: trustees named in the identity's latest set_recovery, at least
+# `primary_threshold` of them, each signing the identity, the chain head the event follows and the new keys. Like an
+# owner approval, a trustee signature names the trustee's chain state and is checked against the trustee's key as of
+# that state (so a trustee who recovered their own key can still vouch); a node also demands the trustee's current key.
+# Backup trustees are not used yet.
+
+
+def recovery_message(identity: str, prev: str, new_pubkey: str, new_encryption_pubkey: str, trustee: str, state: str) -> bytes:
+    return _canonical({
+        "purpose": "nodetide-social-recovery-v1",
+        "identity": identity,
+        "prev": prev,
+        "new_pubkey": new_pubkey,
+        "new_encryption_pubkey": new_encryption_pubkey,
+        "trustee": trustee,
+        "state": state,
+    })
+
+
+def sign_recovery(
+    trustee_identity: str, trustee_keypair: KeyPair, trustee_state: str,
+    identity: str, prev: str, new_pubkey: str, new_encryption_pubkey: str,
+) -> dict[str, str]:
+    """A trustee's signature for restoring `identity` (whose chain head is `prev`) to the new keys."""
+    return {
+        "trustee_identity": trustee_identity,
+        "state": trustee_state,
+        "key": trustee_keypair.verify_key.to_hex(),
+        "signature": trustee_keypair.sign_hex(
+            recovery_message(identity, prev, new_pubkey, new_encryption_pubkey, trustee_identity, trustee_state)
+        ),
+    }
+
+
+def check_recovery_signature(
+    record: Any, identity: str, prev: str, new_pubkey: str, new_encryption_pubkey: str,
+    resolve: ChainResolver | None, check_current: bool = False,
+) -> str | None:
+    """Why one trustee signature does not hold, or None."""
+    if not isinstance(record, dict) or not isinstance(record.get("trustee_identity"), str):
+        return "a recovery signature names its trustee"
+    if resolve is None:
+        return "trustee identities are needed to check a recovery"
+    trustee, state = record["trustee_identity"], record.get("state")
+    chain = resolve(trustee)
+    if chain is None:
+        return f"unknown trustee {trustee[:12]}"
+    key = master_key_at(chain, state) if isinstance(state, str) else None
+    if key is None:
+        return "recovery signature names a chain state the trustee does not have"
+    if record.get("key") != key:
+        return "recovery signature key is not the trustee's key at that state"
+    if check_current and key != chain.get_current_master_key():
+        return "recovery signature uses a key the trustee has since replaced"
+    try:
+        ok = VerifyKey.from_hex(key).verify_hex(
+            recovery_message(identity, prev, new_pubkey, new_encryption_pubkey, trustee, state), record.get("signature", "")
+        )
+    except Exception:
+        ok = False
+    return None if ok else "trustee recovery signature invalid"
+
+
+def check_recovery_event(
+    event: SocialRecoveryEvent, identity: str, config: SetRecoveryEvent | None,
+    resolve: ChainResolver | None, check_current: bool = False,
+) -> str | None:
+    """Why a social_recovery event is not backed by enough trustees, or None."""
+    if config is None:
+        return "no recovery was set up"
+    if event.signed_by != event.new_pubkey:
+        return "a recovery is signed by the new key"
+    done: set[str] = set()
+    for record in event.recovery_signatures or []:
+        err = check_recovery_signature(
+            record, identity, event.prev, event.new_pubkey, event.new_encryption_pubkey, resolve, check_current
+        )
+        if err:
+            return err
+        trustee = record["trustee_identity"]
+        if trustee not in config.primary_trustees:
+            return "recovery signature from someone who is not a trustee"
+        if trustee in done:
+            return "a trustee signed twice"
+        done.add(trustee)
+    if len(done) < max(1, config.primary_threshold):
+        return f"{len(done)} of {config.primary_threshold} trustees signed"
+    return None
+
+
+def check_recovery_config(event: SetRecoveryEvent, identity: str, resolve: ChainResolver | None) -> str | None:
+    """Why a recovery set-up is unusable (so it can never be satisfied or forged), or None."""
+    trustees = event.primary_trustees
+    if not isinstance(trustees, list) or not all(isinstance(t, str) for t in trustees) or len(set(trustees)) != len(trustees):
+        return "trustees are distinct identity hashes"
+    if identity in trustees:
+        return "you cannot be your own trustee"
+    if not isinstance(event.primary_threshold, int) or isinstance(event.primary_threshold, bool) \
+            or not 1 <= event.primary_threshold <= len(trustees):
+        return "the threshold is between 1 and the number of trustees"
+    return None
+
+
 @dataclass
 class Sigchain:
     """Append-only chain of signed events for an identity."""
@@ -1247,6 +1353,7 @@ class Sigchain:
         revoked: set[str] = set()
         claim_states: dict[str, bool] = {}  # claim_id -> revoked?
         claim_types: dict[str, str] = {}    # claim_id -> claim type
+        recovery_config: SetRecoveryEvent | None = None
 
         # Verify each subsequent event
         for i, event in enumerate(self.events[1:], start=1):
@@ -1307,6 +1414,11 @@ class Sigchain:
                     devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
                 elif isinstance(event, RevokeDeviceEvent):
                     revoked.add(event.device_pubkey)
+                elif isinstance(event, SetRecoveryEvent):
+                    err = check_recovery_config(event, self.identity_hash, resolve)
+                    if err:
+                        return False, f"Event {i}: {err}"
+                    recovery_config = event
             elif isinstance(event, (AddClaimEvent, RevokeClaimEvent, SetClaimOrderEvent)):
                 # Master, or a currently valid device with manage_claims
                 if event.signed_by != current_master:
@@ -1349,7 +1461,11 @@ class Sigchain:
                     return False, f"Event {i}: rotation must be signed by old master"
                 current_master = event.new_pubkey
             elif isinstance(event, SocialRecoveryEvent):
-                # TODO: verify threshold of trustee signatures
+                err = check_recovery_event(
+                    event, self.identity_hash, recovery_config, resolve, check_current and i == len(self.events) - 1
+                )
+                if err:
+                    return False, f"Event {i}: {err}"
                 current_master = event.new_pubkey
 
             prev_hash = event.event_hash()

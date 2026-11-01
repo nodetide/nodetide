@@ -17,7 +17,17 @@ still open, so a new session can pick up without re-deriving context.
 - Organizations without owners (every one before this) keep working, governed by their own key.
 - Tests: `python/tests/test_org_identity.py`, one node round trip in `test_pairing_api.py`.
 
+- **Social recovery that works** (`core/identity.py`): a `social_recovery` event is signed by the NEW key and needs `primary_threshold` distinct
+  trustees from the latest `set_recovery`, each signing (identity, chain head, new keys) with the key they had at a named chain state (a node demands
+  their current key). `set_recovery` is checked too: distinct trustees, not yourself, threshold 1..n. The node used to build an unsigned event itself
+  and never checked trustee signatures; now `POST .../recovery/{id}/sign` verifies each signature, the status carries the records once the threshold is
+  met, and the recovering client signs and submits the event. At most 5 pending recoveries per identity; backup trustees are still not used.
+- Web client: "I lost my keys (recover with trustees)" and "Help someone recover" (identities view). The recovering browser makes a new master key,
+  shows a recovery code for the trustees, and on completion publishes the recovery, adds a device and keeps the identity (it needs a new backup
+  afterwards). The headless-Chrome test covers losing keys twice and a browser identity vouching for a Python one.
+
 ### Open
+- Backup trustees and the test wallet app (`deploy/test/wallet`) have no recovery UI yet; recovery restores control of the identity, not claim values.
 - Other `verify()` callers (claims, auth, explorer, OIDC, relay, daemon, email verifier) do not pass a resolver yet, so an owned organization fails there
   until they do. Next: trustee-signed `social_recovery` (the check is still a TODO), then the verifier's device key and the signing step in the wallet.
 

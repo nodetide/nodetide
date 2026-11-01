@@ -17,7 +17,8 @@ import pytest
 from aiohttp.test_utils import TestServer
 
 from nodetide.api.app import create_app
-from nodetide.core.identity import Identity
+from nodetide.core.crypto import KeyPair
+from nodetide.core.identity import Identity, Sigchain, SocialRecoveryEvent, sign_recovery
 from nodetide.core.storage import Storage
 
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -62,12 +63,13 @@ async def test_banner_backup_recovery_and_restore():
     chrome = None
     try:
         async with aiohttp.ClientSession() as http:
-            trustees = []
+            trustees, people = [], []
             for _ in range(3):
                 i = Identity.create(name="trustee")
                 async with http.post(f"{base}/api/identities", json={"event": i.sigchain.to_list()[0]}) as r:
                     assert r.status in (200, 201)
                 trustees.append(i.identity_hash)
+                people.append(i)
 
             chrome = subprocess.Popen(
                 [CHROME, "--headless=new", f"--remote-debugging-port={CDP_PORT}", f"--user-data-dir={tempfile.mkdtemp()}",
@@ -168,6 +170,72 @@ async def test_banner_backup_recovery_and_restore():
                 # the restored master key works, under the new local password only
                 assert await backup("another strong passphrase", "another strong passphrase", "new-local-pass-9") is None
                 assert "Invalid identity password" in await backup("another strong passphrase", "another strong passphrase")
+
+                # --- social recovery: the keys are lost again; two of the three trustees restore control -----------------
+                await page.js("localStorage.clear()", wait=False)
+                await load()
+                lost = comp('[x-data=protectionUI]')
+                assert "at least 8" in await attempt(f"const c={lost}; c.lost={{identityHash:{json.dumps(identity)},password:'x'}}; await c.askForRecovery();")
+                assert "64 hex" in await attempt(f"const c={lost}; c.lost={{identityHash:'nope',password:'new-local-pass-9'}}; await c.askForRecovery();")
+                assert await attempt(f"const c={lost}; c.lost={{identityHash:{json.dumps(identity)},password:'new-local-pass-9',code:'',waiting:false,collected:0,threshold:0}}; await c.askForRecovery();") is None
+                code = await page.js(f"{lost}.lost.code")
+                rid = code.split(":")[1]
+                async with http.get(f"{base}/api/identities/{identity}/recovery/{rid}") as r:
+                    st = await r.json()
+                assert st["status"] == "pending" and st["threshold"] == 2
+                assert await attempt(f"await {lost}.checkRecovery();") is None  # nobody has signed yet: it just reports that
+                for who in (people[0], people[2]):
+                    rec = sign_recovery(who.identity_hash, who.local_keypair, who.sigchain.head_hash, identity, st["prev"],
+                                        st["new_master_pubkey"], st["new_encryption_pubkey"])
+                    async with http.post(f"{base}/api/identities/{identity}/recovery/{rid}/sign", json={"record": rec}) as r:
+                        assert r.status == 200, await r.text()
+                assert await attempt(f"await {lost}.checkRecovery();") is None
+                await asyncio.sleep(0.5)
+                async with http.get(f"{base}/api/identities/{identity}/sigchain") as r:
+                    chain = await r.json()
+                assert chain["length"] == 5  # genesis, add_device, set_recovery, social_recovery, add_device
+                async with http.get(f"{base}/api/identities/{identity}") as r:
+                    info = await r.json()
+                assert info["verified"] is True
+                assert await page.js("Alpine.store('identity').identities.length") == 1
+                held = await page.js("Alpine.store('identity').identities[0].masterSigningPubkey")
+                assert info["master_pubkey"] == held == st["new_master_pubkey"]
+                await page.js(f"Alpine.store('identity').setActive({json.dumps(identity)})")
+                await asyncio.sleep(1)
+                assert await page.js("Alpine.store('protection').backupDone") is False  # a new key needs a new backup
+                assert await page.js("Alpine.store('protection').recoveryDone") is True
+
+                # --- the browser as a trustee: its signature must satisfy the node (cross-language check) -----------------
+                await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'trustee-in-browser',
+                    method:'password',password:'trustee-pass-12',confirmPassword:'trustee-pass-12',distributionPoints:''}};
+                    await m.createIdentity();}})()""")
+                await asyncio.sleep(1)
+                browser_trustee = await page.js("Alpine.store('identity').activeHash")
+                assert browser_trustee != identity
+                friend = Identity.create(name="friend")
+                async with http.post(f"{base}/api/identities", json={"event": friend.sigchain.to_list()[0]}) as r:
+                    assert r.status == 201
+                friend.set_recovery([browser_trustee, people[0].identity_hash, people[1].identity_hash], 2)
+                async with http.post(f"{base}/api/identities/{friend.identity_hash}/events", json={"event": friend.sigchain.to_list()[1]}) as r:
+                    assert r.status == 201, await r.text()
+                new = KeyPair.generate()
+                async with http.post(f"{base}/api/identities/{friend.identity_hash}/recovery/initiate", json={
+                        "new_pubkey": new.verify_key.to_hex(), "new_encryption_pubkey": new.public_encryption_key.to_hex()}) as r:
+                    started = await r.json()
+                fcode = f"{friend.identity_hash}:{started['recovery_id']}"
+                assert await attempt(f"const c={lost}; c.help={{code:{json.dumps(fcode)},password:'wrong-pass-123',seen:null}}; await c.lookUp(); await c.vouch();") is not None
+                assert await attempt(f"const c={lost}; c.help={{code:{json.dumps(fcode)},password:'trustee-pass-12',seen:null}}; await c.lookUp(); await c.vouch();") is None
+                rec = sign_recovery(people[0].identity_hash, people[0].local_keypair, people[0].sigchain.head_hash, friend.identity_hash,
+                                    started["prev"], new.verify_key.to_hex(), new.public_encryption_key.to_hex())
+                async with http.post(f"{base}/api/identities/{friend.identity_hash}/recovery/{started['recovery_id']}/sign", json={"record": rec}) as r:
+                    done = await r.json()
+                assert done["status"] == "complete"
+                ev = SocialRecoveryEvent(type=None, timestamp=1, prev=started["prev"], signature="", signed_by=new.verify_key.to_hex(),
+                                         new_pubkey=new.verify_key.to_hex(), new_encryption_pubkey=new.public_encryption_key.to_hex(),
+                                         recovery_signatures=[x["record"] for x in done["signatures"]])
+                ev.signature = new.sign_hex(json.dumps(ev.signable_dict(), sort_keys=True, separators=(",", ":")).encode())
+                async with http.post(f"{base}/api/identities/{friend.identity_hash}/events", json={"event": ev.to_dict()}) as r:
+                    assert r.status == 201, await r.text()  # the browser's signature convinced the node
     finally:
         if chrome:
             chrome.terminate()
