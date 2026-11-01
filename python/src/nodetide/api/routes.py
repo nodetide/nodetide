@@ -77,7 +77,7 @@ async def create_identity(request: web.Request) -> web.Response:
 
         # Parse event
         logger.info("create_identity: parsing event...")
-        event = GenesisEvent._from_dict(event_data)
+        event = SigchainEvent.from_dict(event_data)  # keeps an organization's owner approvals
 
         # Create sigchain
         sigchain = Sigchain(events=[event])
@@ -86,14 +86,15 @@ async def create_identity(request: web.Request) -> web.Response:
 
         # Verify sigchain
         logger.info("create_identity: verifying sigchain...")
-        valid, err = sigchain.verify()
+        already_known = storage.get_sigchain(identity_hash) is not None
+        valid, err = sigchain.verify(storage.get_sigchain, check_current=not already_known)
         if not valid:
             logger.warning(f"create_identity: sigchain verification failed: {err}")
             return error_response(ErrorCode.INVALID_SIGCHAIN, err or "Invalid sigchain", 400)
 
         # A genesis event is public, so posting it again must never replace what the identity has become since
         # (devices, claims, recovery): answer "already there" and leave the stored chain alone.
-        if storage.get_sigchain(identity_hash) is not None:
+        if already_known:
             return web.json_response(
                 CreateIdentityResponse(
                     identity_hash=identity_hash,
@@ -184,7 +185,7 @@ async def get_identity(request: web.Request) -> web.Response:
         }
 
     # Verify
-    valid, _ = sigchain.verify()
+    valid, _ = sigchain.verify(storage.get_sigchain)
 
     return web.json_response(
         IdentityResponse(
@@ -259,8 +260,8 @@ async def submit_event(request: web.Request) -> web.Response:
         event = SigchainEvent.from_dict(event_data)
         sigchain.append(event)
 
-        # Verify updated sigchain
-        valid, err = sigchain.verify()
+        # Verify updated sigchain (an organization's owner approvals are checked against the owners' chains here)
+        valid, err = sigchain.verify(storage.get_sigchain, check_current=True)
         if not valid:
             return error_response(ErrorCode.INVALID_SIGCHAIN, err or "Invalid sigchain after append", 400)
 
@@ -724,7 +725,7 @@ async def verify_sigchain(request: web.Request) -> web.Response:
             return error_response(ErrorCode.INVALID_REQUEST, "Missing sigchain", 400)
 
         sigchain = Sigchain.from_list(events_data)
-        valid, err = sigchain.verify()
+        valid, err = sigchain.verify(request.app["storage"].get_sigchain)
 
         if valid:
             return web.json_response(

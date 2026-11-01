@@ -109,6 +109,10 @@ def verify_event_signature(
     signature = event.get("signature")
     signed_by = event.get("signed_by")
 
+    if signed_by == "owners":
+        # Decided by the owners of an organization: their approvals are checked with the whole chain
+        return (True, None) if event_type != "genesis" else (False, "Genesis must be self-signed")
+
     if not signature:
         return False, "Missing signature"
 
@@ -116,7 +120,7 @@ def verify_event_signature(
         return False, "Missing signed_by"
 
     # Build signable dict (event without signature)
-    signable = {k: v for k, v in event.items() if k != "signature"}
+    signable = {k: v for k, v in event.items() if k not in ("signature", "approvals")}
     signable_json = json.dumps(signable, sort_keys=True, separators=(",", ":"))
 
     try:

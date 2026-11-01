@@ -95,3 +95,41 @@ async def test_posting_a_known_genesis_again_never_truncates_the_chain(client):
     assert again.status == 200  # idempotent
     chain = await (await client.get(f"/api/identities/{identity.identity_hash}/sigchain")).json()
     assert chain["length"] == 2
+
+
+async def test_organization_events_need_owner_approvals_and_the_node_checks_them(client):
+    from nodetide.core.crypto import KeyPair
+    from nodetide.core.identity import (
+        AddDeviceEvent, GenesisEvent, Identity, IdentityType, approve, propose_governed,
+    )
+
+    me = Identity.create(name="me")
+    assert (await client.post("/api/identities", json={"event": me.sigchain.to_list()[0]})).status == 201
+
+    key = KeyPair.generate()
+    genesis = GenesisEvent.create(
+        key, identity_type=IdentityType.ORGANIZATION, name="org",
+        owners=[{"identity": me.identity_hash, "weight": 100}],
+    )
+    # without the owner's approval the node refuses it
+    assert (await client.post("/api/identities", json={"event": genesis.to_dict()})).status == 400
+    approve(genesis, me.identity_hash, me.local_keypair, me.sigchain.head_hash)
+    created = await client.post("/api/identities", json={"event": genesis.to_dict()})
+    assert created.status == 201
+    org = (await created.json())["identity_hash"]
+
+    device = KeyPair.generate()
+    event = propose_governed(
+        AddDeviceEvent, genesis.event_hash(), device_pubkey=device.verify_key.to_hex(),
+        device_encryption_pubkey=device.public_encryption_key.to_hex(), label="verifier", capabilities=["manage_claims"],
+    )
+    # unapproved: refused, and the chain stays as it was
+    assert (await client.post(f"/api/identities/{org}/events", json={"event": event.to_dict()})).status == 400
+    approve(event, me.identity_hash, me.local_keypair, me.sigchain.head_hash)
+    assert (await client.post(f"/api/identities/{org}/events", json={"event": event.to_dict()})).status == 201
+    chain = await (await client.get(f"/api/identities/{org}/sigchain")).json()
+    assert chain["length"] == 2
+    info = await (await client.get(f"/api/identities/{org}")).json()
+    assert info["verified"] is True
+    # replaying the organization's genesis stays harmless
+    assert (await client.post("/api/identities", json={"event": genesis.to_dict()})).status == 200

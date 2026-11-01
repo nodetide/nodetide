@@ -10,7 +10,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 from nodetide.core.crypto import (
     KeyPair,
@@ -38,6 +38,7 @@ class EventType(str, Enum):
     ADD_CLAIM = "add_claim"
     REVOKE_CLAIM = "revoke_claim"
     SET_CLAIM_ORDER = "set_claim_order"
+    SET_OWNERS = "set_owners"
 
 
 class IdentityType(str, Enum):
@@ -71,10 +72,13 @@ class SigchainEvent:
     version: int = 1
     alg: str = DEFAULT_SIGN_ALG
     hash_alg: str = DEFAULT_HASH_ALG
+    # Owner approvals (organization identities): see "Organization identities" below. Part of the event hash, not of
+    # what anyone signs, so approvals can be collected one after another.
+    approvals: list[dict[str, str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        d = {
             "version": self.version,
             "type": self.type.value,
             "alg": self.alg,
@@ -84,11 +88,15 @@ class SigchainEvent:
             "signature": self.signature,
             "signed_by": self.signed_by,
         }
+        if self.approvals is not None:  # absent for ordinary events, so existing hashes do not change
+            d["approvals"] = self.approvals
+        return d
 
     def signable_dict(self) -> dict[str, Any]:
-        """Get dictionary for signing (excludes signature)."""
+        """Get dictionary for signing (excludes the signature and the owner approvals)."""
         d = self.to_dict()
         del d["signature"]
+        d.pop("approvals", None)
         return d
 
     def event_hash(self) -> str:
@@ -112,13 +120,17 @@ class SigchainEvent:
             EventType.ADD_CLAIM: AddClaimEvent,
             EventType.REVOKE_CLAIM: RevokeClaimEvent,
             EventType.SET_CLAIM_ORDER: SetClaimOrderEvent,
+            EventType.SET_OWNERS: SetOwnersEvent,
         }
 
         event_class = event_classes.get(event_type)
         if event_class is None:
             raise ValueError(f"Unknown event type: {event_type}")
 
-        return event_class._from_dict(data)
+        event = event_class._from_dict(data)
+        if data.get("approvals") is not None:
+            event.approvals = [dict(a) for a in data["approvals"]]
+        return event
 
 
 @dataclass(kw_only=True)
@@ -132,6 +144,7 @@ class GenesisEvent(SigchainEvent):
     ephemeral: bool = False
     ownership_proof: str | None = None  # for ephemeral, link to persistent identity
     distribution_points: list[str] | None = None  # initial distribution endpoints
+    owners: list[dict[str, Any]] | None = None  # organization identities: [{"identity", "weight"}], see below
 
     def __post_init__(self):
         self.type = EventType.GENESIS
@@ -148,6 +161,8 @@ class GenesisEvent(SigchainEvent):
             "ownership_proof": self.ownership_proof,
             "distribution_points": self.distribution_points,
         })
+        if self.owners is not None:
+            d["owners"] = self.owners
         return d
 
     @classmethod
@@ -168,6 +183,7 @@ class GenesisEvent(SigchainEvent):
             ephemeral=data.get("ephemeral", False),
             ownership_proof=data.get("ownership_proof"),
             distribution_points=data.get("distribution_points"),
+            owners=data.get("owners"),
         )
 
     @classmethod
@@ -179,6 +195,7 @@ class GenesisEvent(SigchainEvent):
         ephemeral: bool = False,
         ownership_proof: str | None = None,
         distribution_points: list[str] | None = None,
+        owners: list[dict[str, Any]] | None = None,
     ) -> GenesisEvent:
         """Create and sign a new genesis event."""
         event = cls(
@@ -194,6 +211,7 @@ class GenesisEvent(SigchainEvent):
             ephemeral=ephemeral,
             ownership_proof=ownership_proof,
             distribution_points=distribution_points,
+            owners=owners,
         )
         # Sign the event
         signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
@@ -522,6 +540,35 @@ class SocialRecoveryEvent(SigchainEvent):
 
 
 @dataclass(kw_only=True)
+class SetOwnersEvent(SigchainEvent):
+    """Replace the owners of an organization identity (decided by the current owners, by the usual rule)."""
+
+    owners: list[dict[str, Any]]  # [{"identity", "weight"}]
+
+    def __post_init__(self):
+        self.type = EventType.SET_OWNERS
+
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d["owners"] = self.owners
+        return d
+
+    @classmethod
+    def _from_dict(cls, data: dict[str, Any]) -> SetOwnersEvent:
+        return cls(
+            type=EventType.SET_OWNERS,
+            timestamp=data["timestamp"],
+            prev=data["prev"],
+            signature=data["signature"],
+            signed_by=data["signed_by"],
+            version=data.get("version", 1),
+            alg=data.get("alg", DEFAULT_SIGN_ALG),
+            hash_alg=data.get("hash_alg", DEFAULT_HASH_ALG),
+            owners=data["owners"],
+        )
+
+
+@dataclass(kw_only=True)
 class ResolveForkEvent(SigchainEvent):
     """Resolve a fork by choosing a branch."""
 
@@ -834,6 +881,150 @@ class DeviceInfo:
     expires: int | None
 
 
+# --- Organization identities -------------------------------------------------------------------------------------
+#
+# An organization identity is owned by other (personal) identities, each with a weight. The genesis declares the owners
+# and carries the approval of every one of them; the organization's own key signs it like any genesis. From then on the
+# events that change who holds the organization's keys (rotate_master, add_device, revoke_device) and the owner set
+# itself (set_owners) are "governed": they carry signed_by == GOVERNED and no signature of their own, only owner
+# approvals. Such an event is valid when the approving owners' weights add up to MORE than half of all declared weights.
+# The owners and weights in force are those declared before the event, so a change cannot vote itself in.
+#
+# An approval names the owner's identity and the head of the owner's chain at signing time ("state"). It is checked
+# against the owner's master key AS OF that state, so an owner who later rotates or recovers their key does not
+# invalidate old organization events, and recovering an owner (social recovery) needs no organization event at all.
+# When a node accepts a new event it also requires that key to be the owner's CURRENT key (check_current), so a key
+# an owner has since replaced can no longer sign.
+
+GOVERNED = "owners"
+MAX_OWNERS = 16
+MAX_OWNER_WEIGHT = 1_000_000
+GOVERNED_TYPES = (EventType.ROTATE_MASTER, EventType.ADD_DEVICE, EventType.REVOKE_DEVICE, EventType.SET_OWNERS)
+
+ChainResolver = Callable[[str], "Sigchain | None"]
+
+
+def _canonical(obj: Any) -> bytes:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def approval_message(event: SigchainEvent, owner_identity: str, state: str) -> bytes:
+    """What an owner signs to approve an event: the event body, bound to the owner and the chain state used."""
+    return _canonical({
+        "purpose": "nodetide-owner-approval-v1",
+        "owner": owner_identity,
+        "state": state,
+        "event": event.signable_dict(),
+    })
+
+
+def approve(event: SigchainEvent, owner_identity: str, owner_keypair: KeyPair, owner_state: str) -> dict[str, str]:
+    """Add (or replace) one owner's approval on an event. `owner_state` is the head hash of the owner's own chain."""
+    approval = {
+        "identity": owner_identity,
+        "state": owner_state,
+        "key": owner_keypair.verify_key.to_hex(),
+        "signature": owner_keypair.sign_hex(approval_message(event, owner_identity, owner_state)),
+    }
+    event.approvals = [a for a in (event.approvals or []) if a.get("identity") != owner_identity] + [approval]
+    return approval
+
+
+def propose_governed(event_cls: type[SigchainEvent], prev_hash: str, **fields: Any) -> SigchainEvent:
+    """Build an unsigned governed event; owners add approvals with `approve`."""
+    return event_cls(
+        type=EventType.GENESIS,  # replaced by the class's __post_init__
+        timestamp=int(time.time()),
+        prev=prev_hash,
+        signature="",
+        signed_by=GOVERNED,
+        approvals=[],
+        **fields,
+    )
+
+
+def master_key_at(chain: Sigchain, state: str) -> str | None:
+    """The master key of `chain` right after the event whose hash is `state` (None if the chain has no such event)."""
+    key = None
+    for event in chain.events:
+        if isinstance(event, GenesisEvent):
+            key = event.pubkey
+        elif isinstance(event, (RotateMasterEvent, SocialRecoveryEvent)):
+            key = event.new_pubkey
+        if event.event_hash() == state:
+            return key
+    return None
+
+
+def check_owner_list(owners: Any, resolve: ChainResolver | None) -> str | None:
+    """Why a declared owner list is unusable, or None. Owners must be known personal identities."""
+    if not isinstance(owners, list) or not 1 <= len(owners) <= MAX_OWNERS:
+        return f"an organization has between 1 and {MAX_OWNERS} owners"
+    seen: set[str] = set()
+    for owner in owners:
+        if not isinstance(owner, dict) or set(owner) != {"identity", "weight"}:
+            return "an owner is {identity, weight}"
+        identity, weight = owner["identity"], owner["weight"]
+        if not isinstance(identity, str) or not identity:
+            return "an owner needs an identity hash"
+        if isinstance(weight, bool) or not isinstance(weight, int) or not 1 <= weight <= MAX_OWNER_WEIGHT:
+            return f"an owner's weight is a whole number from 1 to {MAX_OWNER_WEIGHT}"
+        if identity in seen:
+            return "an owner is listed twice"
+        seen.add(identity)
+        if resolve is None:
+            return "owner identities are needed to check an organization"
+        chain = resolve(identity)
+        genesis = chain.genesis if chain else None
+        if genesis is None:
+            return f"unknown owner identity {identity[:12]}"
+        if genesis.identity_type != IdentityType.PERSONAL or genesis.owners is not None:
+            return "an owner must be a personal identity"
+    return None
+
+
+def approval_score(
+    event: SigchainEvent,
+    owners: list[dict[str, Any]],
+    resolve: ChainResolver | None,
+    check_current: bool = False,
+) -> tuple[int, int, str | None]:
+    """(approved weight, total weight, error) for the approvals on an event."""
+    total = sum(o["weight"] for o in owners)
+    weights = {o["identity"]: o["weight"] for o in owners}
+    approvals = event.approvals or []
+    if resolve is None:
+        return 0, total, "owner identities are needed to check an organization"
+    done: set[str] = set()
+    approved = 0
+    for a in approvals:
+        identity = a.get("identity") if isinstance(a, dict) else None
+        if identity not in weights:
+            return 0, total, "approval from someone who is not an owner"
+        if identity in done:
+            return 0, total, "an owner approved twice"
+        chain = resolve(identity)
+        if chain is None:
+            return 0, total, f"unknown owner identity {identity[:12]}"
+        state = a.get("state")
+        key = master_key_at(chain, state) if isinstance(state, str) else None
+        if key is None:
+            return 0, total, "approval names a chain state the owner does not have"
+        if a.get("key") != key:
+            return 0, total, "approval key is not the owner's key at that state"
+        if check_current and key != chain.get_current_master_key():
+            return 0, total, "approval uses a key the owner has since replaced"
+        try:
+            ok = VerifyKey.from_hex(key).verify_hex(approval_message(event, identity, state), a.get("signature", ""))
+        except Exception:
+            ok = False
+        if not ok:
+            return 0, total, "owner approval signature invalid"
+        done.add(identity)
+        approved += weights[identity]
+    return approved, total, None
+
+
 @dataclass
 class Sigchain:
     """Append-only chain of signed events for an identity."""
@@ -989,8 +1180,31 @@ class Sigchain:
                 recovery = event
         return recovery
 
-    def verify(self) -> tuple[bool, str | None]:
+    @property
+    def is_organization(self) -> bool:
+        """True for an identity governed by owners rather than by its own master key (an organization with no
+        owners, as every one was before owners existed, is governed by its own key like a personal identity)."""
+        genesis = self.genesis
+        return genesis is not None and genesis.owners is not None
+
+    def get_owners(self) -> list[dict[str, Any]] | None:
+        """The owners in force now ([{identity, weight}]), None for an identity that has none."""
+        owners = None
+        for event in self.events:
+            if isinstance(event, (GenesisEvent, SetOwnersEvent)) and event.owners is not None:
+                owners = event.owners
+        return owners
+
+    def verify(
+        self,
+        resolve: ChainResolver | None = None,
+        check_current: bool = False,
+    ) -> tuple[bool, str | None]:
         """Verify the sigchain.
+
+        An organization identity needs `resolve` (identity hash -> that owner's sigchain) to check its owners'
+        approvals. With `check_current`, the newest event's approvals must also use the owners' current keys (what a
+        node demands of a new event; older events only need the key the owner had when approving).
 
         Returns (is_valid, error_message).
         """
@@ -1009,6 +1223,22 @@ class Sigchain:
         if not genesis_key.verify_hex(signable.encode("utf-8"), genesis.signature):
             return False, "Genesis signature invalid"
 
+        owners = genesis.owners
+        if owners is not None:
+            if genesis.identity_type != IdentityType.ORGANIZATION:
+                return False, "Only an organization identity has owners"
+            err = check_owner_list(owners, resolve)
+            if err:
+                return False, f"Genesis: {err}"
+            # The founding owners all agree to the organization they will own
+            approved, total, err = approval_score(genesis, owners, resolve, check_current and len(self.events) == 1)
+            if err:
+                return False, f"Genesis: {err}"
+            if approved != total:
+                return False, "Genesis: every founding owner must approve"
+        elif genesis.approvals:
+            return False, "Genesis: approvals without owners"
+
         # Track current master key
         current_master = genesis.pubkey
         prev_hash = genesis.event_hash()
@@ -1023,6 +1253,42 @@ class Sigchain:
             # Check prev hash
             if event.prev != prev_hash:
                 return False, f"Event {i}: prev hash mismatch"
+
+            if event.signed_by == GOVERNED:
+                # Decided by the owners of an organization, not signed by a key of the chain
+                if owners is None:
+                    return False, f"Event {i}: only an organization is governed by owners"
+                if event.type not in GOVERNED_TYPES:
+                    return False, f"Event {i}: {event.type.value} cannot be decided by owners"
+                if event.signature:
+                    return False, f"Event {i}: a governed event has no signature of its own"
+                approved, total, err = approval_score(event, owners, resolve, check_current and i == len(self.events) - 1)
+                if err:
+                    return False, f"Event {i}: {err}"
+                if 2 * approved <= total:
+                    return False, f"Event {i}: owners approve {approved} of {total}, which is not over half"
+                if isinstance(event, AddDeviceEvent):
+                    devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
+                elif isinstance(event, RevokeDeviceEvent):
+                    revoked.add(event.device_pubkey)
+                elif isinstance(event, RotateMasterEvent):
+                    current_master = event.new_pubkey
+                elif isinstance(event, SetOwnersEvent):
+                    err = check_owner_list(event.owners, resolve)
+                    if err:
+                        return False, f"Event {i}: {err}"
+                    owners = event.owners
+                prev_hash = event.event_hash()
+                continue
+
+            if event.approvals:
+                return False, f"Event {i}: approvals belong on governed events only"
+            if owners is not None and (
+                event.type in GOVERNED_TYPES or event.type in (EventType.SET_RECOVERY, EventType.SOCIAL_RECOVERY)
+            ):
+                return False, f"Event {i}: an organization's {event.type.value} is decided by its owners"
+            if isinstance(event, SetOwnersEvent):
+                return False, f"Event {i}: only an organization has owners"
 
             # Get signer key
             signer_key = VerifyKey.from_hex(event.signed_by)

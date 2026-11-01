@@ -3,6 +3,24 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (owners) - organization identities owned by weighted owner identities
+
+### Added
+- **Owners** (`core/identity.py`, section "Organization identities"): an organization genesis may declare `owners` (`[{identity, weight}]`, personal
+  identities, 1..16, integer weights) and carries every founding owner's approval. `rotate_master`, `add_device`, `revoke_device` and the new
+  `set_owners` are then *governed*: `signed_by` is `"owners"`, no signature of their own, only `approvals`; valid when approving weight is MORE than half
+  of the declared weight (owners and weights in force before the event). The org's own key cannot change keys, recovery or owners.
+- An approval names the owner's chain state and is checked against the owner's key as of that state, so an owner who rotates or recovers their key keeps
+  old organization events valid and needs no organization event (the organization's recovery is the owner's recovery). A node also demands the owner's
+  *current* key for a new event (`verify(resolve, check_current=True)`); `POST /api/identities`, `/events` and `/api/verify` pass the node's storage as
+  resolver.
+- Organizations without owners (every one before this) keep working, governed by their own key.
+- Tests: `python/tests/test_org_identity.py`, one node round trip in `test_pairing_api.py`.
+
+### Open
+- Other `verify()` callers (claims, auth, explorer, OIDC, relay, daemon, email verifier) do not pass a resolver yet, so an owned organization fails there
+  until they do. Next: trustee-signed `social_recovery` (the check is still a TODO), then the verifier's device key and the signing step in the wallet.
+
 ## 2026-11-01 (protection) - one identity on several devices, wallet as a macOS app, and a banner until the identity is recoverable
 
 ### Added
