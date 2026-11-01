@@ -33,9 +33,9 @@ fun SettingsScreen(navController: NavController) {
         AlertDialog(
             onDismissRequest = { showDeleteIdentityDialog = false },
             icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Delete Identity?") },
+            title = { Text("Remove this account?") },
             text = {
-                Text("This will delete your local identity and private key. Make sure you have a backup or another device attached to this identity. This action cannot be undone.")
+                Text("This removes the active account and its private keys from this phone (other accounts stay). Make sure you have a backup or another device attached to this identity. This action cannot be undone.")
             },
             confirmButton = {
                 Button(
@@ -66,13 +66,13 @@ fun SettingsScreen(navController: NavController) {
             icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Clear All Data?") },
             text = {
-                Text("This will delete all local data including your identity, settings, and cached data. This action cannot be undone.")
+                Text("This will delete all local data including EVERY account and its keys, settings, and cached data. This action cannot be undone.")
             },
             confirmButton = {
                 Button(
                     onClick = {
                         scope.launch {
-                            identityStore.clearIdentity()
+                            identityStore.clearAll()
                             settingsStore.clear()
                         }
                         showClearDataDialog = false
@@ -140,7 +140,7 @@ fun SettingsScreen(navController: NavController) {
                         ) {
                             Icon(Icons.Default.Delete, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Delete Identity")
+                            Text("Remove This Account")
                         }
                     } else {
                         Text(

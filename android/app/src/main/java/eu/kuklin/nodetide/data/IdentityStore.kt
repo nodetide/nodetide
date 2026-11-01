@@ -19,46 +19,43 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 
 private val Context.identityDataStore: DataStore<Preferences> by preferencesDataStore(name = "identity")
 
+/**
+ * The identities held on this phone. Several accounts can be kept; one is active, and the screens that ask for "the current
+ * identity" get the active one. Everything is stored as one [AccountBook] document.
+ */
 class IdentityStore(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     companion object {
-        private val IDENTITY_KEY = stringPreferencesKey("local_identity")
-        private val SIGCHAIN_KEY = stringPreferencesKey("sigchain")
+        private val BOOK_KEY = stringPreferencesKey("accounts_v2")
     }
 
-    /**
-     * Get the current local identity.
-     */
-    val identity: Flow<LocalIdentity?> = context.identityDataStore.data.map { prefs ->
-        prefs[IDENTITY_KEY]?.let { json.decodeFromString<LocalIdentity>(it) }
-    }
+    /** All accounts and the active one. */
+    val book: Flow<AccountBook> = context.identityDataStore.data.map { AccountBook.decode(it[BOOK_KEY]) }
 
-    /**
-     * Alias for identity flow (used by UI screens).
-     */
+    val accounts: Flow<List<Account>> = book.map { it.accounts }
+
+    /** The active account's identity. */
+    val identity: Flow<LocalIdentity?> = book.map { it.current?.identity }
+
+    /** Alias for identity flow (used by UI screens). */
     val currentIdentity: Flow<LocalIdentity?> get() = identity
 
-    /**
-     * The cached sigchain as raw events (control chain, then content track).
-     */
-    val sigchain: Flow<List<JsonObject>> = context.identityDataStore.data.map { prefs ->
-        prefs[SIGCHAIN_KEY]?.let { decodeEvents(it) } ?: emptyList()
+    /** The active account's cached sigchain as raw events (control chain, then content track). */
+    val sigchain: Flow<List<JsonObject>> = book.map { it.current?.chain ?: emptyList() }
+
+    private suspend fun update(change: (AccountBook) -> AccountBook) {
+        context.identityDataStore.edit { prefs ->
+            prefs[BOOK_KEY] = change(AccountBook.decode(prefs[BOOK_KEY])).encode()
+        }
     }
 
-    private fun decodeEvents(text: String): List<JsonObject> =
-        Json.parseToJsonElement(text).jsonArray.map { it.jsonObject }
-
-    private fun encodeEvents(events: List<JsonObject>): String = JsonArray(events).toString()
-
     /**
-     * Create a new identity: a master key (which only manages the identity), a device key for daily use that the master
-     * authorizes, and the first two events of the chain (genesis and add_device).
+     * Create a new identity and add it as an account (the active one): a master key (which only manages the identity), a
+     * device key for daily use that the master authorizes, and the first two events of the chain (genesis and add_device).
      */
     suspend fun createIdentity(
         name: String?,
@@ -93,16 +90,12 @@ class IdentityStore(private val context: Context) {
             deviceEncryptionSecretKey = deviceEncryption.secretKey.toHex(),
             deviceEncryptionPublicKey = deviceEncryption.publicKeyHex,
         )
-
-        context.identityDataStore.edit { prefs ->
-            prefs[IDENTITY_KEY] = json.encodeToString(identity)
-            prefs[SIGCHAIN_KEY] = encodeEvents(listOf(genesis, addDevice))
-        }
+        update { it.with(Account(identity, listOf(genesis, addDevice)), makeActive = true) }
         return identity
     }
 
     /**
-     * Attach as a device to an existing identity.
+     * Attach as a device to an existing identity (added as an account, the active one).
      */
     suspend fun attachAsDevice(
         masterIdentityHash: String,
@@ -129,61 +122,40 @@ class IdentityStore(private val context: Context) {
             isDevice = true,
             masterIdentityHash = masterIdentityHash
         )
-
-        // Save identity (sigchain will be updated when AddDevice event is submitted)
-        context.identityDataStore.edit { prefs ->
-            prefs[IDENTITY_KEY] = json.encodeToString(identity)
-            prefs[SIGCHAIN_KEY] = encodeEvents(masterSigchain)
-        }
-
+        // (the chain is updated when the AddDevice event is submitted)
+        update { it.with(Account(identity, masterSigchain), makeActive = true) }
         return identity
     }
 
-    /**
-     * Update the cached sigchain.
-     */
-    suspend fun updateSigchain(events: List<JsonObject>) {
-        context.identityDataStore.edit { prefs ->
-            prefs[SIGCHAIN_KEY] = encodeEvents(events)
-        }
+    /** Update the cached sigchain of the active account (or of [hash]). */
+    suspend fun updateSigchain(events: List<JsonObject>, hash: String? = null) {
+        update { book -> (hash ?: book.current?.hash)?.let { book.withChain(it, events) } ?: book }
     }
 
-    /**
-     * Clear identity data.
-     */
-    suspend fun clear() {
-        context.identityDataStore.edit { prefs ->
-            prefs.remove(IDENTITY_KEY)
-            prefs.remove(SIGCHAIN_KEY)
-        }
-    }
+    /** Make another account the active one. */
+    suspend fun setActive(hash: String) = update { it.activate(hash) }
 
-    /**
-     * Get identity synchronously (for one-time reads).
-     */
+    /** Remove one account from this phone (its keys go with it). */
+    suspend fun removeAccount(hash: String) = update { it.without(hash) }
+
+    /** Remove the active account. */
+    suspend fun clear() = update { book -> book.current?.let { book.without(it.hash) } ?: book }
+
+    /** Remove every account. */
+    suspend fun clearAll() = update { AccountBook() }
+
+    /** Get the active identity synchronously (for one-time reads). */
     suspend fun getIdentity(): LocalIdentity? = identity.first()
 
-    /**
-     * Alias for getIdentity (used by UI screens).
-     */
+    /** Alias for getIdentity (used by UI screens). */
     suspend fun getCurrentIdentity(): LocalIdentity? = getIdentity()
 
-    /**
-     * Get sigchain synchronously.
-     */
+    /** Get the active account's sigchain synchronously. */
     suspend fun getSigchain(): List<JsonObject> = sigchain.first()
 
-    /**
-     * Save identity directly.
-     */
-    suspend fun saveIdentity(identity: LocalIdentity) {
-        context.identityDataStore.edit { prefs ->
-            prefs[IDENTITY_KEY] = json.encodeToString(identity)
-        }
-    }
+    /** Add or update an account for this identity (e.g. one that is only watched) and make it the active one. */
+    suspend fun saveIdentity(identity: LocalIdentity) = update { it.with(Account(identity), makeActive = true) }
 
-    /**
-     * Clear identity (alias for clear).
-     */
+    /** Remove the active account (alias for clear). */
     suspend fun clearIdentity() = clear()
 }

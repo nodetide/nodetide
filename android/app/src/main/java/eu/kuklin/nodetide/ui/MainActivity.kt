@@ -3,8 +3,10 @@ package eu.kuklin.nodetide.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -14,6 +16,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import eu.kuklin.nodetide.NodetideApp
+import eu.kuklin.nodetide.data.AccountBook
 import eu.kuklin.nodetide.ui.screens.*
 import eu.kuklin.nodetide.ui.theme.NodetideTheme
 
@@ -39,6 +43,17 @@ fun NodetideMainContent() {
         topBar = {
             TopAppBar(
                 title = { Text("Nodetide") },
+                actions = {
+                    // The active account; tap to switch, add or remove accounts
+                    val account by NodetideApp.instance.identityStore.book.collectAsState(initial = AccountBook())
+                    TextButton(onClick = { navController.navigate(Screen.Accounts.route) { launchSingleTop = true } }) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(account.current?.identity?.let { it.name ?: it.identityHash.take(8) } ?: "Accounts", maxLines = 1)
+                        if (account.accounts.size > 1) Text(" (${account.accounts.size})")
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Switch account")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -77,6 +92,7 @@ fun NodetideMainContent() {
             composable(Screen.Messages.route) { MessagesScreen(navController) }
             composable(Screen.Relays.route) { RelaysScreen(navController) }
             composable(Screen.Settings.route) { SettingsScreen(navController) }
+            composable(Screen.Accounts.route) { AccountsScreen(navController) }
             composable(Screen.CreateIdentity.route) { CreateIdentityScreen(navController) }
             composable(Screen.AttachDevice.route) { AttachDeviceScreen(navController) }
             composable(Screen.ScanQR.route) { ScanQRScreen(navController) }
@@ -92,6 +108,7 @@ sealed class Screen(val route: String, val label: String, val icon: androidx.com
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 
     // Non-bottom-nav screens
+    data object Accounts : Screen("accounts", "Accounts", Icons.Default.AccountCircle)
     data object CreateIdentity : Screen("create_identity", "Create Identity", Icons.Default.Add)
     data object AttachDevice : Screen("attach_device", "Attach Device", Icons.Default.Link)
     data object ScanQR : Screen("scan_qr", "Scan QR", Icons.Default.QrCodeScanner)

@@ -89,6 +89,9 @@ fun HomeScreen(navController: NavController) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        TextButton(onClick = { navController.navigate(Screen.Accounts.route) }) {
+                            Text("Accounts (switch or add)")
+                        }
                     } else {
                         Text(
                             text = "No identity configured",

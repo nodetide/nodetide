@@ -46,7 +46,7 @@ fun CreateIdentityScreen(navController: NavController) {
                         refused = client.submitEvent(identity.identityHash, event).exceptionOrNull()
                     }
                     if (refused != null) {
-                        identityStore.clearIdentity() // nothing half-made is kept when the node says no
+                        identityStore.removeAccount(identity.identityHash) // nothing half-made is kept when the node says no (other accounts stay)
                         error = "The node did not accept the identity: ${refused.message}"
                         isCreating = false
                         return@launch
