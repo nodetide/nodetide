@@ -93,6 +93,11 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                     info = await r.json()
                 assert info["name"] == "Алекс" and info["verified"] is True
 
+                # the organizations card is on the Wallet tab, visible even while the wallet is locked
+                await page.js("Alpine.store('app').setView('wallet')")
+                assert await page.js("""(()=>{const e=[...document.querySelectorAll('.card-title')]
+                    .find(x=>x.textContent.includes('Organizations you own')); return !!e && e.offsetParent!==null})()""")
+
                 # locked until the password is given; wrong password refused
                 assert await page.js("Alpine.store('wallet').unlocked") is False
                 assert "Could not unlock" in await attempt(f"const c={wallet}; c.password='nope'; await c.unlock();")
