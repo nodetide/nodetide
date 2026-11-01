@@ -14,8 +14,6 @@ import eu.kuklin.nodetide.crypto.SigningKeyPair
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -26,15 +24,30 @@ private val Context.identityDataStore: DataStore<Preferences> by preferencesData
  * The identities held on this phone. Several accounts can be kept; one is active, and the screens that ask for "the current
  * identity" get the active one. Everything is stored as one [AccountBook] document.
  */
-class IdentityStore(private val context: Context) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-
+class IdentityStore(
+    private val context: Context,
+    /** Seals the stored accounts; on a phone, an Android Keystore key. */
+    private val box: SecretBox = AesGcmBox { KeystoreKey.get() },
+) {
     companion object {
-        private val BOOK_KEY = stringPreferencesKey("accounts_v2")
+        private val SEALED_KEY = stringPreferencesKey("accounts_v3")        // encrypted
+        private val PLAIN_KEY = stringPreferencesKey("accounts_v2")         // an earlier development build kept it in clear
+        private val OLD_KEYS = listOf(stringPreferencesKey("local_identity"), stringPreferencesKey("sigchain"))
     }
 
-    /** All accounts and the active one. */
-    val book: Flow<AccountBook> = context.identityDataStore.data.map { AccountBook.decode(it[BOOK_KEY]) }
+    private fun load(prefs: Preferences): Loaded {
+        prefs[SEALED_KEY]?.let { return SealedBook.open(it, box) }
+        prefs[PLAIN_KEY]?.let { return Loaded.Ok(AccountBook.decode(it)) }   // read until migrate() has sealed it
+        return Loaded.Ok(AccountBook())
+    }
+
+    private val loaded: Flow<Loaded> = context.identityDataStore.data.map(::load)
+
+    /** All accounts and the active one (empty while the stored data cannot be opened: see [problem]). */
+    val book: Flow<AccountBook> = loaded.map { (it as? Loaded.Ok)?.book ?: AccountBook() }
+
+    /** Why the stored accounts cannot be opened, or null. While set, nothing is written over them. */
+    val problem: Flow<String?> = loaded.map { (it as? Loaded.Unreadable)?.reason }
 
     val accounts: Flow<List<Account>> = book.map { it.accounts }
 
@@ -47,9 +60,36 @@ class IdentityStore(private val context: Context) {
     /** The active account's cached sigchain as raw events (control chain, then content track). */
     val sigchain: Flow<List<JsonObject>> = book.map { it.current?.chain ?: emptyList() }
 
+    /** Thrown instead of overwriting accounts that exist but cannot be opened. */
+    class Unreadable(reason: String) : IllegalStateException("the stored accounts cannot be opened: $reason")
+
+    /** Apply a change and write the book back sealed. If the stored data is unreadable, nothing is written. */
     private suspend fun update(change: (AccountBook) -> AccountBook) {
         context.identityDataStore.edit { prefs ->
-            prefs[BOOK_KEY] = change(AccountBook.decode(prefs[BOOK_KEY])).encode()
+            when (val now = load(prefs)) {
+                is Loaded.Unreadable -> throw Unreadable(now.reason)
+                is Loaded.Ok -> {
+                    prefs[SEALED_KEY] = SealedBook.seal(change(now.book), box)
+                    prefs.remove(PLAIN_KEY)
+                }
+            }
+        }
+    }
+
+    /** Seal anything an earlier build left in clear, and delete it. Safe to call on every start. */
+    suspend fun migrate() {
+        context.identityDataStore.edit { prefs ->
+            val plain = prefs[PLAIN_KEY]
+            if (plain != null && prefs[SEALED_KEY] == null) prefs[SEALED_KEY] = SealedBook.seal(AccountBook.decode(plain), box)
+            prefs.remove(PLAIN_KEY)
+            OLD_KEYS.forEach { prefs.remove(it) }
+        }
+    }
+
+    /** The user's decision to give up on accounts that cannot be opened: forget them so a new start is possible. */
+    suspend fun discardUnreadable() {
+        context.identityDataStore.edit { prefs ->
+            if (load(prefs) is Loaded.Unreadable) prefs.remove(SEALED_KEY)
         }
     }
 
@@ -141,8 +181,11 @@ class IdentityStore(private val context: Context) {
     /** Remove the active account. */
     suspend fun clear() = update { book -> book.current?.let { book.without(it.hash) } ?: book }
 
-    /** Remove every account. */
-    suspend fun clearAll() = update { AccountBook() }
+    /** Remove every account (also when they cannot be opened). */
+    suspend fun clearAll() = context.identityDataStore.edit { prefs ->
+        prefs.remove(SEALED_KEY)
+        prefs.remove(PLAIN_KEY)
+    }.let { }
 
     /** Get the active identity synchronously (for one-time reads). */
     suspend fun getIdentity(): LocalIdentity? = identity.first()

@@ -25,7 +25,25 @@ fun AccountsScreen(navController: NavController) {
     val scope = rememberCoroutineScope()
     val store = remember { NodetideApp.instance.identityStore }
     val book by store.book.collectAsState(initial = eu.kuklin.nodetide.data.AccountBook())
+    val problem by store.problem.collectAsState(initial = null)
     var removing by remember { mutableStateOf<Account?>(null) }
+    var discarding by remember { mutableStateOf(false) }
+
+    if (discarding) {
+        AlertDialog(
+            onDismissRequest = { discarding = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Discard the unreadable accounts?") },
+            text = { Text("They are stored encrypted with a key this phone no longer has, so they cannot be opened here and nothing in them can be recovered on this phone. Discard them only if you have a backup or another device that holds these identities.") },
+            confirmButton = {
+                Button(
+                    onClick = { scope.launch { store.discardUnreadable() }; discarding = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text("Discard") }
+            },
+            dismissButton = { TextButton(onClick = { discarding = false }) { Text("Cancel") } },
+        )
+    }
 
     removing?.let { account ->
         AlertDialog(
@@ -61,7 +79,25 @@ fun AccountsScreen(navController: NavController) {
             )
         }
 
-        if (book.accounts.isEmpty()) {
+        if (problem != null) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Your accounts cannot be opened", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "They are encrypted with a key kept in this phone's secure hardware, and that key is gone or the data was changed. " +
+                                "This can happen after restoring the phone from a backup or changing its security. Nothing was deleted: the app will not " +
+                                "write over them. Restore from a backup, or discard them to start again.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(onClick = { discarding = true }) { Text("Discard unreadable accounts") }
+                    }
+                }
+            }
+        }
+
+        if (book.accounts.isEmpty() && problem == null) {
             item { Text("No accounts yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
 

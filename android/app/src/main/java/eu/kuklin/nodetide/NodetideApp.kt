@@ -5,7 +5,10 @@ import eu.kuklin.nodetide.data.IdentityStore
 import eu.kuklin.nodetide.data.SettingsStore
 import eu.kuklin.nodetide.discovery.RelayDiscoveryService
 import eu.kuklin.nodetide.network.ApiClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class NodetideApp : Application() {
@@ -25,6 +28,8 @@ class NodetideApp : Application() {
         super.onCreate()
         instance = this
         identityStore = IdentityStore(this)
+        // seal anything an earlier build left in clear
+        CoroutineScope(Dispatchers.IO).launch { runCatching { identityStore.migrate() } }
         settingsStore = SettingsStore(this)
         discoveryService = RelayDiscoveryService(this)
     }
