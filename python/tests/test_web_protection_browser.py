@@ -20,7 +20,7 @@ from nodetide.api.app import create_app
 from nodetide.core.crypto import KeyPair
 from nodetide.core.identity import Identity, Sigchain, SocialRecoveryEvent, sign_recovery
 from nodetide.core.storage import Storage as VerifierStorage
-from nodetide.verifiers.issuer import IssuerNotReady, device_request, load_owned
+from nodetide.verifiers.issuer import IssuerNotReady, founding_request, load_owned
 from nodetide.core.storage import Storage
 
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -239,29 +239,35 @@ async def test_banner_backup_recovery_and_restore():
                 async with http.post(f"{base}/api/identities/{friend.identity_hash}/events", json={"event": ev.to_dict()}) as r:
                     assert r.status == 201, await r.text()  # the browser's signature convinced the node
 
-                # --- an organization owned by this browser identity, and a verifier whose key it authorizes -----------------
+                # --- an organization owned by this browser identity: the verifier's key founds nothing without the owner -------
                 verifier_db = VerifierStorage.memory()
-                request = device_request(verifier_db, "Test verifier")
+                founding = founding_request(verifier_db, "Test verifier", browser_trustee)
 
-                def org_form(**kw):
-                    form = {"password": "trustee-pass-12", "orgHash": "", "name": "", "request": "", "result": None, **kw}
-                    return attempt(f"const c={lost}; c.org={json.dumps(form)}; await c.createOrganization();")
+                def approve_form(request, password="trustee-pass-12"):
+                    form = {"password": password, "request": request, "result": None}
+                    return attempt(f"const c={lost}; c.org={json.dumps(form)}; await c.approveOrganization();")
 
-                assert "name" in await org_form()
-                assert "Invalid identity password" in await org_form(password="wrong", name="Test verifier")
-                assert await org_form(name="Test verifier") is None
+                assert "Invalid identity password" in await approve_form(json.dumps(founding), "wrong")
+                assert "not the founding" in await approve_form(json.dumps({"type": "genesis", "identity_type": "personal"}))
+                forged = json.loads(json.dumps(founding)); forged["genesis"]["name"] = "Evil"
+                assert "signature is invalid" in await approve_form(json.dumps(forged))
+                outsider = json.loads(json.dumps(founding_request(VerifierStorage.memory(), "Other", people[0].identity_hash)))
+                assert "not one of this organization" in await approve_form(json.dumps(outsider))
+                with pytest.raises(IssuerNotReady, match="ISSUER_ORG"):
+                    await asyncio.to_thread(load_owned, verifier_db, "Test verifier", None, base, browser_trustee)
+
+                assert await approve_form(json.dumps(founding)) is None
                 org_hash = await page.js(f"{lost}.org.result.orgHash")
                 async with http.get(f"{base}/api/identities/{org_hash}") as r:
                     org_info = await r.json()
                 assert org_info["type"] == "organization" and org_info["verified"] is True
-                with pytest.raises(IssuerNotReady, match="not authorized"):
-                    await asyncio.to_thread(load_owned, verifier_db, "Test verifier", org_hash, base)
-                assert await org_form(orgHash=org_hash, request=json.dumps(request)) is None
-                issuer = await asyncio.to_thread(load_owned, verifier_db, "Test verifier", org_hash, base)
-                assert issuer.identity_hash == org_hash and issuer.identity.local_keypair is None
+
+                # the verifier, given the hash, has its organization authorize the signing key by itself
+                issuer = await asyncio.to_thread(load_owned, verifier_db, "Test verifier", org_hash, base, browser_trustee)
+                assert issuer.identity_hash == org_hash
                 async with http.get(f"{base}/api/identities/{org_hash}") as r:
                     org_info = await r.json()
-                assert org_info["verified"] is True and any(d["pubkey"] == request["device_pubkey"] for d in org_info["devices"])
+                assert org_info["verified"] is True and len(org_info["devices"]) == 2
     finally:
         if chrome:
             chrome.terminate()

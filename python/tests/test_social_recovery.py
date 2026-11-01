@@ -2,7 +2,7 @@
 
 from nodetide.core.crypto import KeyPair
 from nodetide.core.identity import (
-    GenesisEvent, Identity, IdentityType, SocialRecoveryEvent, Sigchain, approve, propose_governed, AddDeviceEvent,
+    GenesisEvent, Identity, IdentityType, SocialRecoveryEvent, Sigchain, approve, propose_governed, RotateMasterEvent,
     sign_recovery,
 )
 
@@ -139,7 +139,7 @@ def test_recovered_owner_keeps_an_organization_alive():
     me.sigchain.append(recover(me, [a, b], new))
     assert me.sigchain.verify(w.resolve, check_current=True)[0]
 
-    ev = propose_governed(AddDeviceEvent, org.head_hash, device_pubkey=KeyPair.generate().verify_key.to_hex(), device_encryption_pubkey="00" * 32, label="v", capabilities=[])
+    ev = propose_governed(RotateMasterEvent, org.head_hash, new_pubkey=KeyPair.generate().verify_key.to_hex(), new_encryption_pubkey="00" * 32)
     approve(ev, me.identity_hash, new, me.sigchain.head_hash)
     org.append(ev)
     assert org.verify(w.resolve, check_current=True) == (True, None)

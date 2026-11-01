@@ -12,7 +12,9 @@ from nodetide.core.claims import (
     AttestationRevocation,
 )
 from nodetide.core.crypto import KeyPair, SigningKey
-from nodetide.core.identity import ClaimRecord, DeviceCapability, Identity, IdentityType, Sigchain
+from nodetide.core.identity import (
+    AddDeviceEvent, ClaimRecord, DeviceCapability, GenesisEvent, Identity, IdentityType, Sigchain,
+)
 from nodetide.core.storage import Storage
 
 
@@ -85,58 +87,85 @@ class NodeIssuer:
 
 # --- An issuer owned by other identities ----------------------------------------------------------------------------
 #
-# The verifier holds only a signing device key. The organization it signs for belongs to its owners (see "Organization
-# identities" in core/identity.py): they create it, authorize this key with an approved add_device event and can revoke
-# it, all in their own wallet. Nothing here can change who owns the organization.
+# The organization it signs for has its own key, held here, and runs itself with it: this key authorizes the signing
+# device below, and a replacement later. Its OWNERS (other identities, with weights; see "Organization identities" in
+# core/identity.py) are needed for two things only: the founding approval, and recovering the organization's key (or
+# changing the owners) if this server's key is lost or taken. They approve in their own wallet; nothing here can change
+# who the owners are.
 
 ISSUER_CAPABILITIES = [DeviceCapability.SIGN_IDENTITY.value]
 
 
 class IssuerNotReady(Exception):
-    """The owned issuer cannot sign yet: it has no organization or the organization has not authorized its key."""
+    """The owned issuer cannot sign yet: its organization is not founded, or this server no longer holds its key."""
 
 
-def device_request(storage: Storage, name: str) -> dict[str, Any]:
-    """The signing device's public data, which the owners authorize (made once, kept in storage)."""
-    row = storage.get_issuer_device()
+def parse_owners(text: str | None) -> list[dict[str, Any]]:
+    """'<identity hash>[:weight],...' (weight defaults to 100) -> the owner list of a genesis."""
+    owners = []
+    for part in (text or "").replace("\n", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        identity, _, weight = part.partition(":")
+        owners.append({"identity": identity.strip().lower(), "weight": int(weight) if weight.strip() else 100})
+    if not owners:
+        raise IssuerNotReady("NODETIDE_ISSUER_OWNERS is not set: name the identity (or identities) that own this issuer")
+    return owners
+
+
+def _owned_row(storage: Storage, name: str, owners_text: str | None) -> dict[str, Any]:
+    """The keys and the (not yet approved) genesis of this issuer, made once and kept."""
+    row = storage.get_owned_issuer()
     if row is None:
-        keypair = KeyPair.generate()
-        storage.save_issuer_device(
-            keypair.signing_key.to_hex(), keypair.verify_key.to_hex(), keypair.public_encryption_key.to_hex()
+        owners = parse_owners(owners_text)
+        master, device = KeyPair.generate(), KeyPair.generate()
+        genesis = GenesisEvent.create(master, identity_type=IdentityType.ORGANIZATION, name=name, owners=owners)
+        storage.save_owned_issuer(
+            json.dumps(master.to_dict()), json.dumps(device.to_dict()), json.dumps(genesis.to_dict())
         )
-        row = storage.get_issuer_device()
+        row = storage.get_owned_issuer()
     assert row is not None
-    return {
-        "name": name,
-        "device_pubkey": row["device_pubkey"],
-        "device_encryption_pubkey": row["device_encryption_pubkey"],
-        "label": "attestation signer",
-        "capabilities": ISSUER_CAPABILITIES,
-    }
+    return row
+
+
+def founding_request(storage: Storage, name: str, owners_text: str | None) -> dict[str, Any]:
+    """What the owners approve to found the organization: the genesis, signed by the organization's own key."""
+    row = _owned_row(storage, name, owners_text)
+    genesis = json.loads(row["genesis_json"])
+    return {"name": name, "genesis": genesis, "owners": genesis["owners"]}
+
+
+def _http_json(url: str, body: dict[str, Any] | None = None) -> Any:
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 (operator-configured node address)
+        return json.loads(response.read())
 
 
 def _fetch_chain(node_url: str, identity_hash: str) -> Sigchain:
-    url = f"{node_url.rstrip('/')}/api/identities/{identity_hash}/sigchain"
-    with urllib.request.urlopen(url, timeout=20) as response:  # noqa: S310 (operator-configured node address)
-        return Sigchain.from_list(json.loads(response.read())["events"])
+    return Sigchain.from_list(_http_json(f"{node_url.rstrip('/')}/api/identities/{identity_hash}/sigchain")["events"])
 
 
-def load_owned(storage: Storage, name: str, org_hash: str | None, node_url: str | None) -> NodeIssuer:
-    """The issuer for an organization its owners created. Raises IssuerNotReady until that organization lists our key.
+def load_owned(
+    storage: Storage, name: str, org_hash: str | None, node_url: str | None, owners_text: str | None = None
+) -> NodeIssuer:
+    """The issuer for the organization its owners founded. Raises IssuerNotReady until that is the case.
 
-    The organization's chain and its owners' chains are fetched from `node_url` (when given) and checked here, with
-    the owners' chains as the resolver; what passes is kept in storage so the verifier can serve it.
+    The organization's chain and its owners' chains are fetched from `node_url` (when given) and checked here; what
+    passes is kept in storage so the verifier can serve it. If the chain does not yet list our signing device, the
+    organization's own key adds it (an ordinary event, no owner needed) and the node is told.
     """
-    request = device_request(storage, name)
+    row = _owned_row(storage, name, owners_text)
     if not org_hash:
-        raise IssuerNotReady("NODETIDE_ISSUER_ORG is not set: give the owners the device request and set it afterwards")
+        raise IssuerNotReady("NODETIDE_ISSUER_ORG is not set: the owners approve the founding request, then set it")
+    master = KeyPair.from_dict(json.loads(row["master_keys"]))
+    device = KeyPair.from_dict(json.loads(row["device_keys"]))
     chain = storage.get_sigchain(org_hash)
     if node_url:
         try:
             fetched = _fetch_chain(node_url, org_hash)
-            owner_chains = {
-                o["identity"]: _fetch_chain(node_url, o["identity"]) for o in (fetched.get_owners() or [])
-            }
+            owner_chains = {o["identity"]: _fetch_chain(node_url, o["identity"]) for o in (fetched.get_owners() or [])}
             if fetched.identity_hash != org_hash:
                 raise IssuerNotReady("the node returned another chain than the organization asked for")
             ok, err = fetched.verify(owner_chains.get)
@@ -144,7 +173,6 @@ def load_owned(storage: Storage, name: str, org_hash: str | None, node_url: str 
                 raise IssuerNotReady(f"the organization's chain does not verify: {err}")
             for owner_chain in owner_chains.values():
                 storage.save_sigchain(owner_chain)
-            storage.save_sigchain(fetched)
             chain = fetched
         except IssuerNotReady:
             raise
@@ -156,9 +184,26 @@ def load_owned(storage: Storage, name: str, org_hash: str | None, node_url: str 
     ok, err = chain.verify(storage.get_sigchain)
     if not ok:
         raise IssuerNotReady(f"the organization's chain does not verify: {err}")
-    device = next((d for d in chain.get_active_devices() if d.pubkey == request["device_pubkey"]), None)
-    if device is None or DeviceCapability.SIGN_IDENTITY.value not in device.capabilities:
-        raise IssuerNotReady("the organization's owners have not authorized this verifier's key yet")
-    row = storage.get_issuer_device()
-    assert row is not None
-    return NodeIssuer(Identity(sigchain=chain, local_keypair=None), SigningKey.from_hex(row["device_signing_key"]))
+    if chain.get_current_master_key() != master.verify_key.to_hex():
+        raise IssuerNotReady(
+            "the organization's key is no longer the one this server holds (its owners replaced it); "
+            "this server needs the new key before it can act for the organization again"
+        )
+
+    device_pub = device.verify_key.to_hex()
+    if not any(d.pubkey == device_pub and DeviceCapability.SIGN_IDENTITY.value in d.capabilities
+               for d in chain.get_active_devices()):
+        event = AddDeviceEvent.create(
+            master, device, "attestation signer", chain.head_hash, [DeviceCapability.SIGN_IDENTITY]
+        )
+        chain.append(event)
+        ok, err = chain.verify(storage.get_sigchain)
+        if not ok:
+            raise IssuerNotReady(f"cannot authorize the signing key: {err}")
+        if node_url:
+            try:
+                _http_json(f"{node_url.rstrip('/')}/api/identities/{org_hash}/events", {"event": event.to_dict()})
+            except Exception as e:
+                raise IssuerNotReady(f"the node did not accept the signing key's authorization: {e}") from e
+    storage.save_sigchain(chain)
+    return NodeIssuer(Identity(sigchain=chain, local_keypair=master), device.signing_key)

@@ -509,58 +509,33 @@
       };
     },
 
-    _parseDeviceRequest(text) {
-      let request;
-      try { request = JSON.parse(text); } catch { throw new Error('The device request is the JSON the verifier shows at /api/issuer/request'); }
-      for (const f of ['device_pubkey', 'device_encryption_pubkey']) {
-        if (!/^[0-9a-f]{64}$/.test(request[f] || '')) throw new Error(`The device request has no valid ${f}`);
-      }
-      return request;
-    },
-
-    async organizationDevice(ownerHash, ownerPassword, orgHash, name, requestText) {
+    async approveOrganization(ownerHash, ownerPassword, requestText) {
       /**
-       * Create an organization owned by this identity (orgHash empty) and/or authorize a device key for it.
-       * The organization's own key is made here and thrown away: from then on only its owners can change anything.
+       * Approve the founding of an organization this identity owns. The request is the genesis the organization's own
+       * key (held by the verifier) has already signed. Every owner must approve it; a partly approved genesis is
+       * handed to the next owner, and the last one publishes it.
        */
       const owner = this.getIdentity(ownerHash);
       if (!owner || !owner.encryptedMasterKeys) throw new Error('This browser does not hold the owner identity\'s master key');
-      const request = requestText && requestText.trim() ? this._parseDeviceRequest(requestText) : null;
-      if (!orgHash && !(name || '').trim()) throw new Error('Give the new organization a name');
-      if (orgHash && !request) throw new Error('Paste the device request to authorize');
+      let request;
+      try { request = JSON.parse(requestText); } catch { throw new Error('Paste the JSON the verifier shows at /api/issuer/request'); }
+      const genesis = request.genesis || request;
+      if (genesis.type !== 'genesis' || genesis.identity_type !== 'organization' || !Array.isArray(genesis.owners)) {
+        throw new Error('That is not the founding request of an organization');
+      }
+      const { signature, approvals, ...unsigned } = genesis;
+      if (!Crypto.verify(canonicalize(unsigned), signature, genesis.pubkey)) throw new Error('The request\'s signature is invalid');
+      const mine = genesis.owners.find(o => o.identity === ownerHash);
+      if (!mine) throw new Error('The active identity is not one of this organization\'s owners');
+
       const { master } = await this._unlockBoth(owner, ownerPassword);
-      const timestamp = Math.floor(Date.now() / 1000);
-
-      if (!orgHash) {
-        const throwaway = Crypto.generateKeyPair();
-        const genesis = {
-          version: 1, type: 'genesis', alg: 'ed25519', hash_alg: 'sha256', timestamp, prev: null,
-          signed_by: throwaway.signing.publicKey, pubkey: throwaway.signing.publicKey,
-          encryption_pubkey: throwaway.encryption.publicKey, identity_type: 'organization', name: name.trim(),
-          ephemeral: false, ownership_proof: null, distribution_points: null,
-          owners: [{ identity: ownerHash, weight: 100 }],
-        };
-        genesis.signature = Crypto.sign(canonicalize(genesis), throwaway.signing.secretKey);
-        genesis.approvals = [await this._ownerApproval(owner, master, genesis)];
-        orgHash = await sha256(canonicalize(genesis));
-        await api.submitGenesisEvent(genesis);
-      }
-
-      let authorized = false;
-      if (request) {
-        const chain = await api.request('GET', `/identities/${orgHash}/sigchain`);
-        const events = chain.events || [];
-        const event = {
-          version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp,
-          prev: await sha256(canonicalize(events[events.length - 1])), signed_by: 'owners', signature: '',
-          device_pubkey: request.device_pubkey, device_encryption_pubkey: request.device_encryption_pubkey,
-          label: request.label || 'attestation signer', capabilities: request.capabilities || ['sign_identity'], expires: null,
-        };
-        event.approvals = [await this._ownerApproval(owner, master, event)];
-        await api.submitEvent(orgHash, event);
-        authorized = true;
-      }
-      return { orgHash, authorized };
+      const approval = await this._ownerApproval(owner, master, genesis);
+      genesis.approvals = [...(approvals || []).filter(a => a.identity !== ownerHash), approval];
+      const complete = genesis.owners.every(o => genesis.approvals.some(a => a.identity === o.identity));
+      if (!complete) return { complete: false, genesis, name: genesis.name, owners: genesis.owners };
+      const orgHash = await sha256(canonicalize(genesis));
+      await api.submitGenesisEvent(genesis);
+      return { complete: true, orgHash, genesis, name: genesis.name, owners: genesis.owners };
     },
 
     // --- Social recovery -------------------------------------------------------------------------------------
@@ -1176,16 +1151,16 @@
       },
 
       // Organizations owned by this identity
-      org: { password: '', orgHash: '', name: '', request: '', result: null },
+      org: { password: '', request: '', result: null },
 
-      async createOrganization() {
+      async approveOrganization() {
         Alpine.store('app').loading = true;
         try {
-          this.org.result = await KeyStore.organizationDevice(
-            Alpine.store('identity').activeHash, this.org.password, (this.org.orgHash || '').trim().toLowerCase(),
-            this.org.name, this.org.request);
+          this.org.result = await KeyStore.approveOrganization(
+            Alpine.store('identity').activeHash, this.org.password, this.org.request);
           this.org.password = '';
-          Alpine.store('app').showSuccess(this.org.result.authorized ? 'Done: the organization lists the verifier\'s key.' : 'Organization created.');
+          Alpine.store('app').showSuccess(this.org.result.complete
+            ? 'The organization is founded.' : 'Approved. Pass the result on to the next owner.');
         } catch (e) {
           Alpine.store('app').showError('Could not do that: ' + e.message);
         } finally {

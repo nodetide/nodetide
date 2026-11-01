@@ -100,7 +100,7 @@ async def test_posting_a_known_genesis_again_never_truncates_the_chain(client):
 async def test_organization_events_need_owner_approvals_and_the_node_checks_them(client):
     from nodetide.core.crypto import KeyPair
     from nodetide.core.identity import (
-        AddDeviceEvent, GenesisEvent, Identity, IdentityType, approve, propose_governed,
+        AddDeviceEvent, GenesisEvent, Identity, IdentityType, RotateMasterEvent, approve, propose_governed,
     )
 
     me = Identity.create(name="me")
@@ -118,19 +118,24 @@ async def test_organization_events_need_owner_approvals_and_the_node_checks_them
     assert created.status == 201
     org = (await created.json())["identity_hash"]
 
+    # the organization runs itself: its own key authorizes a device, no owner involved
     device = KeyPair.generate()
-    event = propose_governed(
-        AddDeviceEvent, genesis.event_hash(), device_pubkey=device.verify_key.to_hex(),
-        device_encryption_pubkey=device.public_encryption_key.to_hex(), label="verifier", capabilities=["manage_claims"],
+    add = AddDeviceEvent.create(key, device, "verifier", genesis.event_hash(), None)
+    assert (await client.post(f"/api/identities/{org}/events", json={"event": add.to_dict()})).status == 201
+
+    # replacing the organization's key is the owners' job: refused without their approval, accepted with it
+    new = KeyPair.generate()
+    rotate = propose_governed(
+        RotateMasterEvent, add.event_hash(), new_pubkey=new.verify_key.to_hex(),
+        new_encryption_pubkey=new.public_encryption_key.to_hex(),
     )
-    # unapproved: refused, and the chain stays as it was
-    assert (await client.post(f"/api/identities/{org}/events", json={"event": event.to_dict()})).status == 400
-    approve(event, me.identity_hash, me.local_keypair, me.sigchain.head_hash)
-    assert (await client.post(f"/api/identities/{org}/events", json={"event": event.to_dict()})).status == 201
+    assert (await client.post(f"/api/identities/{org}/events", json={"event": rotate.to_dict()})).status == 400
+    approve(rotate, me.identity_hash, me.local_keypair, me.sigchain.head_hash)
+    assert (await client.post(f"/api/identities/{org}/events", json={"event": rotate.to_dict()})).status == 201
     chain = await (await client.get(f"/api/identities/{org}/sigchain")).json()
-    assert chain["length"] == 2
+    assert chain["length"] == 3
     info = await (await client.get(f"/api/identities/{org}")).json()
-    assert info["verified"] is True
+    assert info["verified"] is True and info["master_pubkey"] == new.verify_key.to_hex()
     # replaying the organization's genesis stays harmless
     assert (await client.post("/api/identities", json={"event": genesis.to_dict()})).status == 200
 

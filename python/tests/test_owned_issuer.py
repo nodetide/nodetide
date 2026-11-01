@@ -1,74 +1,78 @@
-"""An attestation issuer owned by a person: the verifier holds only a device key the owner authorizes."""
+"""An attestation issuer that is an organization with owners: it runs itself with its own key; owners found it."""
 
 import pytest
 
-from nodetide.core.claims import Attestation, ClaimDocument, verify_attestation, verify_revocation
+from nodetide.core.claims import ClaimDocument, verify_attestation, verify_revocation
 from nodetide.core.crypto import KeyPair
-from nodetide.core.identity import (
-    AddDeviceEvent, GenesisEvent, Identity, IdentityType, RevokeDeviceEvent, Sigchain, approve, propose_governed,
-)
+from nodetide.core.identity import Identity, RotateMasterEvent, Sigchain, SigchainEvent, approve, propose_governed
 from nodetide.core.storage import Storage
-from nodetide.verifiers.issuer import IssuerNotReady, device_request, load_owned
+from nodetide.verifiers.issuer import IssuerNotReady, founding_request, load_owned, parse_owners
 
 
-def make_org(owner: Identity) -> Sigchain:
-    genesis = GenesisEvent.create(
-        KeyPair.generate(), identity_type=IdentityType.ORGANIZATION, name="My verifier",
-        owners=[{"identity": owner.identity_hash, "weight": 100}],
-    )
+def found(request: dict, owner: Identity) -> Sigchain:
+    genesis = SigchainEvent.from_dict(request["genesis"])
     approve(genesis, owner.identity_hash, owner.local_keypair, owner.sigchain.head_hash)
     return Sigchain(events=[genesis])
 
 
-def authorize(org: Sigchain, owner: Identity, request: dict) -> None:
-    event = propose_governed(
-        AddDeviceEvent, org.head_hash, device_pubkey=request["device_pubkey"],
-        device_encryption_pubkey=request["device_encryption_pubkey"], label=request["label"], capabilities=request["capabilities"],
-    )
-    approve(event, owner.identity_hash, owner.local_keypair, owner.sigchain.head_hash)
-    org.append(event)
+def test_parse_owners():
+    assert parse_owners("ab, cd:30") == [{"identity": "ab", "weight": 100}, {"identity": "cd", "weight": 30}]
+    with pytest.raises(IssuerNotReady, match="OWNERS"):
+        parse_owners("")
 
 
 def test_owned_issuer_lifecycle():
-    verifier_db = Storage.memory()
+    db = Storage.memory()
     owner = Identity.create(name="me")
-    request = device_request(verifier_db, "My verifier")
-    assert device_request(verifier_db, "My verifier")["device_pubkey"] == request["device_pubkey"]  # kept, not remade
+    owners = owner.identity_hash
 
-    # no organization yet, then one that has not authorized the key: not ready, and nothing to sign with
+    request = founding_request(db, "My verifier", owners)
+    assert founding_request(db, "My verifier", None) == request  # made once, kept
+    assert request["owners"] == [{"identity": owner.identity_hash, "weight": 100}]
+
     with pytest.raises(IssuerNotReady, match="ISSUER_ORG"):
-        load_owned(verifier_db, "My verifier", None, None)
-    org = make_org(owner)
-    verifier_db.save_sigchain(owner.sigchain)
-    verifier_db.save_sigchain(org)
-    with pytest.raises(IssuerNotReady, match="not authorized"):
-        load_owned(verifier_db, "My verifier", org.identity_hash, None)
+        load_owned(db, "My verifier", None, None, owners)
 
-    # the owner authorizes the key; the verifier now issues
-    authorize(org, owner, request)
-    verifier_db.save_sigchain(org)
-    issuer = load_owned(verifier_db, "My verifier", org.identity_hash, None)
+    # the owner approves the founding request; the verifier then authorizes its own signing key, no owner needed
+    org = found(request, owner)
+    db.save_sigchain(owner.sigchain)
+    db.save_sigchain(org)
+    issuer = load_owned(db, "My verifier", org.identity_hash, None, owners)
     assert issuer.identity_hash == org.identity_hash and issuer.name == "My verifier"
-    assert issuer.identity.local_keypair is None  # no master key on the server
+    assert len(issuer.identity.sigchain.get_active_devices()) == 2  # the org key and the signing device
 
     holder = Identity.create(name="Alice")
     doc = ClaimDocument.create(holder.identity_hash, "email", "alice@example.com")
     holder.add_claim(doc.claim_id, doc.claim_type, doc.commitment)
-    att = issuer.issue(holder.identity_hash, holder.sigchain.get_claim(doc.claim_id), holder.sigchain.head_hash, "email_code", "low")
+    record = holder.sigchain.get_claim(doc.claim_id)
+    att = issuer.issue(holder.identity_hash, record, holder.sigchain.head_hash, "email_code", "low")
 
     resolve = {owner.identity_hash: owner.sigchain}.get
-    assert verify_attestation(att, holder.sigchain, org, resolve=resolve).ok
-    assert not verify_attestation(att, holder.sigchain, org).ok  # a relying party must be able to look the owners up
-    rev = issuer.revoke(att.id, "test")
-    assert verify_revocation(rev, org, resolve=resolve).ok
+    chain = issuer.identity.sigchain
+    assert verify_attestation(att, holder.sigchain, chain, resolve=resolve).ok
+    assert not verify_attestation(att, holder.sigchain, chain).ok  # a relying party must be able to look the owners up
+    assert verify_revocation(issuer.revoke(att.id, "test"), chain, resolve=resolve).ok
 
-    # the owner revokes the key: attestations signed from then on are refused
-    revoke = propose_governed(RevokeDeviceEvent, org.head_hash, device_pubkey=request["device_pubkey"], reason="server lost")
-    approve(revoke, owner.identity_hash, owner.local_keypair, owner.sigchain.head_hash)
-    org.append(revoke)
-    assert org.verify(resolve)[0]
-    late = issuer.issue(holder.identity_hash, holder.sigchain.get_claim(doc.claim_id), holder.sigchain.head_hash, "email_code", "low")
-    assert not verify_attestation(late, holder.sigchain, org, resolve=resolve).ok
-    verifier_db.save_sigchain(org)
-    with pytest.raises(IssuerNotReady):
-        load_owned(verifier_db, "My verifier", org.identity_hash, None)
+    # a restart finds everything as it was (nothing new to authorize)
+    again = load_owned(db, "My verifier", org.identity_hash, None, owners)
+    assert again.identity.sigchain.head_hash == chain.head_hash
+
+
+def test_a_replaced_org_key_stops_this_server_until_it_has_the_new_key():
+    db = Storage.memory()
+    owner = Identity.create(name="me")
+    request = founding_request(db, "V", owner.identity_hash)
+    org = found(request, owner)
+    db.save_sigchain(owner.sigchain)
+    db.save_sigchain(org)
+    load_owned(db, "V", org.identity_hash, None, owner.identity_hash)
+
+    new = KeyPair.generate()  # the owners recover the organization's key elsewhere
+    ev = propose_governed(RotateMasterEvent, org.head_hash if False else db.get_sigchain(org.identity_hash).head_hash,
+                          new_pubkey=new.verify_key.to_hex(), new_encryption_pubkey=new.public_encryption_key.to_hex())
+    approve(ev, owner.identity_hash, owner.local_keypair, owner.sigchain.head_hash)
+    chain = db.get_sigchain(org.identity_hash)
+    chain.append(ev)
+    db.save_sigchain(chain)
+    with pytest.raises(IssuerNotReady, match="no longer the one"):
+        load_owned(db, "V", org.identity_hash, None, owner.identity_hash)

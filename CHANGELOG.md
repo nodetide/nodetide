@@ -7,9 +7,9 @@ still open, so a new session can pick up without re-deriving context.
 
 ### Added
 - **Owners** (`core/identity.py`, section "Organization identities"): an organization genesis may declare `owners` (`[{identity, weight}]`, personal
-  identities, 1..16, integer weights) and carries every founding owner's approval. `rotate_master`, `add_device`, `revoke_device` and the new
+  identities, 1..16, integer weights) and carries every founding owner's approval. `rotate_master` (recovering the organization's key) and the new
   `set_owners` are then *governed*: `signed_by` is `"owners"`, no signature of their own, only `approvals`; valid when approving weight is MORE than half
-  of the declared weight (owners and weights in force before the event). The org's own key cannot change keys, recovery or owners.
+  of the declared weight (owners and weights in force before the event). The organization runs itself with its own key: devices, claims, distribution and a plain rotation are ordinary events it signs; its key cannot change the owners or set recovery.
 - An approval names the owner's chain state and is checked against the owner's key as of that state, so an owner who rotates or recovers their key keeps
   old organization events valid and needs no organization event (the organization's recovery is the owner's recovery). A node also demands the owner's
   *current* key for a new event (`verify(resolve, check_current=True)`); `POST /api/identities`, `/events` and `/api/verify` pass the node's storage as
@@ -26,12 +26,13 @@ still open, so a new session can pick up without re-deriving context.
   shows a recovery code for the trustees, and on completion publishes the recovery, adds a device and keeps the identity (it needs a new backup
   afterwards). The headless-Chrome test covers losing keys twice and a browser identity vouching for a Python one.
 
-- **Owned issuer** (`verifiers/issuer.py`, `ISSUER_OWNED=1`): the verifier holds only a signing device key (table `issuer_device`) and serves its public
-  request at `/api/issuer/request`; the organization (created and authorized in the web client, card "Organizations you own"; its own key is made in the
-  browser and thrown away) is fetched from `NODETIDE_ISSUER_NODE` with its owners' chains, verified, and used once it lists the key. Until then the
-  service only waits and serves the request. `verify_attestation`, `verify_revocation`, `evaluate_claim`, the claims API, the OIDC provider, the identity
+- **Owned issuer** (`verifiers/issuer.py`, `ISSUER_OWNED=1`, `ISSUER_OWNERS`): the verifier holds the organization's own key and a signing device (table
+  `owned_issuer`) and serves the founding request (the genesis its key signed, naming the owners) at `/api/issuer/request`. The owners approve it in the web
+  client (card "Organizations you own"); with `ISSUER_ORG` set the verifier fetches the organization with its owners' chains from `NODETIDE_ISSUER_NODE`,
+  verifies it, and authorizes its own signing device with the org key. Until then the service only waits and serves the request. If the owners replace the
+  organization's key the verifier stops with a clear reason; it cannot yet adopt the new key (open). `verify_attestation`, `verify_revocation`, `evaluate_claim`, the claims API, the OIDC provider, the identity
   fetcher (which also fetches missing owner chains) and the explorer now pass the node's storage as resolver. The issuer info carries `owner_sigchains`.
-- Test stack: `ISSUER_OWNED`, `ISSUER_ORG` in `.env` (README "Owned issuer"); default stays the old self-made issuer.
+- Test stack: `ISSUER_OWNED`, `ISSUER_OWNERS`, `ISSUER_ORG` in `.env` (README "Owned issuer"); default stays the old self-made issuer.
 
 ### Open
 - Backup trustees and the test wallet app (`deploy/test/wallet`) have no recovery UI yet; recovery restores control of the identity, not claim values.

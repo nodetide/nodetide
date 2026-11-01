@@ -176,12 +176,13 @@ CREATE TABLE IF NOT EXISTS node_issuer (
     created_at INTEGER NOT NULL
 );
 
--- The signing device of an issuer that is OWNED by other identities (the owners authorize this key; no master key here)
-CREATE TABLE IF NOT EXISTS issuer_device (
+-- An issuer whose organization is OWNED by other identities: the organization's own key, the signing device, and the
+-- founding genesis (signed by that key, waiting for the owners' approval)
+CREATE TABLE IF NOT EXISTS owned_issuer (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    device_signing_key TEXT NOT NULL,
-    device_pubkey TEXT NOT NULL,
-    device_encryption_pubkey TEXT NOT NULL,
+    master_keys TEXT NOT NULL,
+    device_keys TEXT NOT NULL,
+    genesis_json TEXT NOT NULL,
     created_at INTEGER NOT NULL
 );
 
@@ -812,20 +813,20 @@ class Storage:
                  device_pubkey, device_signing_key, int(time.time())),
             )
 
-    def get_issuer_device(self) -> dict | None:
+    def get_owned_issuer(self) -> dict | None:
         with self.transaction() as cur:
-            cur.execute("SELECT * FROM issuer_device WHERE id = 1")
+            cur.execute("SELECT * FROM owned_issuer WHERE id = 1")
             row = cur.fetchone()
         return dict(row) if row else None
 
-    def save_issuer_device(self, signing_key: str, pubkey: str, encryption_pubkey: str) -> None:
+    def save_owned_issuer(self, master_keys: str, device_keys: str, genesis_json: str) -> None:
         import time
 
         with self.transaction() as cur:
             cur.execute(
-                "INSERT OR IGNORE INTO issuer_device (id, device_signing_key, device_pubkey, device_encryption_pubkey, created_at)"
+                "INSERT OR IGNORE INTO owned_issuer (id, master_keys, device_keys, genesis_json, created_at)"
                 " VALUES (1, ?, ?, ?, ?)",
-                (signing_key, pubkey, encryption_pubkey, int(time.time())),
+                (master_keys, device_keys, genesis_json, int(time.time())),
             )
 
     def set_default_identity(self, identity_hash: str) -> bool:

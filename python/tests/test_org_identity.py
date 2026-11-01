@@ -1,5 +1,7 @@
 """Organization identities: owners with weights, governed key changes, owners that recover their own keys."""
 
+import json
+
 import pytest
 
 from nodetide.core.crypto import KeyPair
@@ -40,30 +42,44 @@ def sign(event, *owners: Identity):
     return event
 
 
-def add_device(chain, device: KeyPair, *owners):
+def recover_key(chain, new: KeyPair, *owners):
+    """The owners restore the organization's key: a governed rotate_master."""
     ev = propose_governed(
-        AddDeviceEvent, chain.head_hash, device_pubkey=device.verify_key.to_hex(),
-        device_encryption_pubkey=device.public_encryption_key.to_hex(), label="verifier", capabilities=["manage_claims"],
+        RotateMasterEvent, chain.head_hash, new_pubkey=new.verify_key.to_hex(),
+        new_encryption_pubkey=new.public_encryption_key.to_hex(),
     )
     return sign(ev, *owners)
 
 
-def test_single_owner_org_needs_that_owner():
+def org_adds_device(chain, org_key: KeyPair, device: KeyPair):
+    """An ordinary add_device signed by the organization's own key: no owner involved."""
+    ev = AddDeviceEvent.create(org_key, device, "verifier", chain.head_hash, None)
+    return ev
+
+
+def test_single_owner_org_runs_itself_and_needs_its_owner_only_for_key_recovery():
     w = World()
     me = w.person("me")
-    chain, _ = w.org([(me, 100)])
+    chain, key = w.org([(me, 100)])
     assert chain.verify(w.resolve) == (True, None)
     assert chain.is_organization
-    chain.append(add_device(chain, KeyPair.generate(), me))
+    # devices are the organization's own business: its key signs them, no owner involved
+    chain.append(org_adds_device(chain, key, KeyPair.generate()))
     assert chain.verify(w.resolve, check_current=True) == (True, None)
     assert len(chain.get_active_devices()) == 2  # org key + new device
+    # and it can rotate its own key
+    chain.append(RotateMasterEvent.create(key, KeyPair.generate(), chain.head_hash))
+    assert chain.verify(w.resolve)[0]
+    # recovering a lost key is the owners' job
+    chain.append(recover_key(chain, KeyPair.generate(), me))
+    assert chain.verify(w.resolve, check_current=True)[0]
 
 
 def test_unapproved_or_unsigned_events_are_rejected():
     w = World()
     me = w.person()
     chain, _ = w.org([(me, 100)])
-    chain.append(add_device(chain, KeyPair.generate()))  # no approvals
+    chain.append(recover_key(chain, KeyPair.generate()))  # no approvals
     ok, err = chain.verify(w.resolve)
     assert not ok and "not over half" in err
 
@@ -77,14 +93,14 @@ def test_over_half_rule_is_strict():
 
     for signers, expected in [((a,), False), ((b,), False), ((c,), False), ((b, c), True), ((a, c), True), ((a, b), True)]:
         trial = Sigchain(events=list(chain.events))
-        trial.append(add_device(trial, dev, *signers))
+        trial.append(recover_key(trial, dev, *signers))
         assert trial.verify(w.resolve)[0] is expected, [s.sigchain.genesis.name for s in signers]
 
     # exactly half does not pass
     w2 = World()
     x, y = w2.person(), w2.person()
     chain2, _ = w2.org([(x, 50), (y, 50)])
-    chain2.append(add_device(chain2, dev, x))
+    chain2.append(recover_key(chain2, dev, x))
     assert not chain2.verify(w2.resolve)[0]
 
 
@@ -125,14 +141,33 @@ def test_organization_cannot_be_verified_without_owner_chains():
     assert not chain.verify()[0]
 
 
-def test_org_key_alone_cannot_change_keys_or_recovery():
+def test_org_key_alone_cannot_change_owners_or_set_recovery():
+    w = World()
+    me, other = w.person(), w.person()
+    chain, key = w.org([(me, 100)])
+    ev = SetOwnersEvent(type=None, timestamp=1, prev=chain.head_hash, signature="", signed_by=key.verify_key.to_hex(),
+                        owners=[{"identity": other.identity_hash, "weight": 100}])
+    ev.signature = key.sign_hex(json.dumps(ev.signable_dict(), sort_keys=True, separators=(",", ":")).encode())
+    trial = Sigchain(events=list(chain.events) + [ev])
+    ok, err = trial.verify(w.resolve)
+    assert not ok and "decided by its owners" in err
+
+    trial = Sigchain(events=list(chain.events))
+    Identity(sigchain=trial, local_keypair=key).set_recovery([me.identity_hash], 1)
+    ok, err = trial.verify(w.resolve)
+    assert not ok and "decided by its owners" in err
+
+
+def test_owners_cannot_decide_devices():
     w = World()
     me = w.person()
-    chain, key = w.org([(me, 100)])
-    new = KeyPair.generate()
-    chain.append(RotateMasterEvent.create(key, new, chain.head_hash))  # signed by the org's own key
+    chain, _ = w.org([(me, 100)])
+    dev = KeyPair.generate()
+    ev = propose_governed(AddDeviceEvent, chain.head_hash, device_pubkey=dev.verify_key.to_hex(),
+                          device_encryption_pubkey=dev.public_encryption_key.to_hex(), label="x", capabilities=[])
+    chain.append(sign(ev, me))
     ok, err = chain.verify(w.resolve)
-    assert not ok and "decided by its owners" in err
+    assert not ok and "cannot be decided by owners" in err
 
 
 def test_rotate_key_by_owners_and_old_key_loses_power():
@@ -146,14 +181,27 @@ def test_rotate_key_by_owners_and_old_key_loses_power():
     assert chain.get_current_master_key() == new.verify_key.to_hex()
 
 
-def test_revoke_device_by_owners():
+def test_old_org_key_loses_power_after_owner_recovery():
     w = World()
     me = w.person()
-    chain, _ = w.org([(me, 100)])
+    chain, old = w.org([(me, 100)])
+    new = KeyPair.generate()
+    chain.append(recover_key(chain, new, me))
+    chain.append(org_adds_device(chain, old, KeyPair.generate()))  # the lost/stolen key tries again
+    ok, err = chain.verify(w.resolve)
+    assert not ok and "master" in err
+    chain.events.pop()
+    chain.append(org_adds_device(chain, new, KeyPair.generate()))
+    assert chain.verify(w.resolve)[0]
+
+
+def test_org_revokes_its_own_device():
+    w = World()
+    me = w.person()
+    chain, key = w.org([(me, 100)])
     dev = KeyPair.generate()
-    chain.append(add_device(chain, dev, me))
-    ev = propose_governed(RevokeDeviceEvent, chain.head_hash, device_pubkey=dev.verify_key.to_hex(), reason="lost")
-    chain.append(sign(ev, me))
+    chain.append(org_adds_device(chain, key, dev))
+    chain.append(RevokeDeviceEvent.create(key, dev.verify_key.to_hex(), chain.head_hash, "lost"))
     assert chain.verify(w.resolve)[0]
     assert dev.verify_key.to_hex() not in [d.pubkey for d in chain.get_active_devices()]
 
@@ -172,8 +220,8 @@ def test_changing_owners_uses_the_old_owners_and_the_old_weights():
     assert chain.verify(w.resolve)[0]
     assert [o["weight"] for o in chain.get_owners()] == [60, 40]
     # a (60 of 100) now suffices alone, b (40) does not
-    c1 = Sigchain(events=list(chain.events)); c1.append(add_device(c1, KeyPair.generate(), a))
-    c2 = Sigchain(events=list(chain.events)); c2.append(add_device(c2, KeyPair.generate(), b))
+    c1 = Sigchain(events=list(chain.events)); c1.append(recover_key(c1, KeyPair.generate(), a))
+    c2 = Sigchain(events=list(chain.events)); c2.append(recover_key(c2, KeyPair.generate(), b))
     assert c1.verify(w.resolve)[0] and not c2.verify(w.resolve)[0]
 
 
@@ -181,10 +229,11 @@ def test_approval_cannot_be_moved_to_another_event_or_org():
     w = World()
     me = w.person()
     chain, _ = w.org([(me, 100)])
-    good = add_device(chain, KeyPair.generate(), me)
+    good = recover_key(chain, KeyPair.generate(), me)
+    evil_key = KeyPair.generate()
     evil = propose_governed(
-        AddDeviceEvent, chain.head_hash, device_pubkey=KeyPair.generate().verify_key.to_hex(),
-        device_encryption_pubkey="00" * 32, label="evil", capabilities=["manage_claims"],
+        RotateMasterEvent, chain.head_hash, new_pubkey=evil_key.verify_key.to_hex(),
+        new_encryption_pubkey=evil_key.public_encryption_key.to_hex(),
     )
     evil.approvals = good.approvals
     trial = Sigchain(events=list(chain.events) + [evil])
@@ -196,8 +245,8 @@ def test_owner_who_rotates_their_key_keeps_old_events_valid_but_cannot_sign_with
     w = World()
     me = w.person()
     chain, _ = w.org([(me, 100)])
-    chain.append(add_device(chain, KeyPair.generate(), me))  # signed with the key at the time
-    stale = add_device(chain, KeyPair.generate(), me)  # prepared with the old key, not yet submitted
+    chain.append(recover_key(chain, KeyPair.generate(), me))  # signed with the key at the time
+    stale = recover_key(chain, KeyPair.generate(), me)  # prepared with the old key, not yet submitted
     old_state_chain = Sigchain(events=list(chain.events) + [stale])
 
     me.rotate_master()
@@ -206,7 +255,7 @@ def test_owner_who_rotates_their_key_keeps_old_events_valid_but_cannot_sign_with
     ok, err = old_state_chain.verify(w.resolve, check_current=True)  # a node refuses it as a NEW event
     assert not ok and "since replaced" in err
 
-    fresh = add_device(chain, KeyPair.generate(), me)  # signed again after the rotation
+    fresh = recover_key(chain, KeyPair.generate(), me)  # signed again after the rotation
     chain.append(fresh)
     assert chain.verify(w.resolve, check_current=True)[0]
 
@@ -225,12 +274,12 @@ def test_owner_recovered_by_trustees_can_still_act_for_the_org():
         new_pubkey=new.verify_key.to_hex(), new_encryption_pubkey=new.public_encryption_key.to_hex(), recovery_signatures=[],
     )
     me.sigchain.append(rec)
-    ev = propose_governed(AddDeviceEvent, chain.head_hash, device_pubkey=KeyPair.generate().verify_key.to_hex(), device_encryption_pubkey="00" * 32, label="x", capabilities=[])
+    ev = propose_governed(RotateMasterEvent, chain.head_hash, new_pubkey=KeyPair.generate().verify_key.to_hex(), new_encryption_pubkey="00" * 32)
     approve(ev, me.identity_hash, new, me.sigchain.head_hash)
     chain.append(ev)
     assert chain.verify(w.resolve, check_current=True)[0]
     # and the lost key no longer works for new events
-    ev2 = propose_governed(AddDeviceEvent, chain.head_hash, device_pubkey=KeyPair.generate().verify_key.to_hex(), device_encryption_pubkey="00" * 32, label="y", capabilities=[])
+    ev2 = propose_governed(RotateMasterEvent, chain.head_hash, new_pubkey=KeyPair.generate().verify_key.to_hex(), new_encryption_pubkey="00" * 32)
     approve(ev2, me.identity_hash, me.local_keypair, rec.prev)  # old key at the old state
     chain.append(ev2)
     assert not chain.verify(w.resolve, check_current=True)[0]
@@ -251,7 +300,7 @@ def test_roundtrip_serialization_keeps_approvals():
     w = World()
     me = w.person()
     chain, _ = w.org([(me, 100)])
-    chain.append(add_device(chain, KeyPair.generate(), me))
+    chain.append(recover_key(chain, KeyPair.generate(), me))
     again = Sigchain.from_list(chain.to_list())
     assert again.head_hash == chain.head_hash
     assert again.verify(w.resolve)[0]

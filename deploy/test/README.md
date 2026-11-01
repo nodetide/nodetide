@@ -192,23 +192,23 @@ shared file and the node's entrypoint pins it as `NODETIDE_OIDC_EMAIL_ISSUERS`, 
 - To receive real mail set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` (starttls|ssl|none), `SMTP_USER`, `SMTP_PASSWORD` and
   `EMAIL_FROM` in `.env` on the server, then `docker compose up -d verifier`.
 
-### Owned issuer (the verifier holds no master key)
+### Owned issuer (an organization with owners)
 
-With `ISSUER_OWNED=1` in `.env` the verifier does not make its own identity. It holds only a **signing key**, and the
-issuing identity is an **organization owned by people**: its owners (identities with weights, over half of the weight
-decides) are the only ones who can authorize, replace or revoke that key, change the owners, or rotate the
-organization's keys. Losing the server therefore never loses the issuer, and the server cannot take it over. An
-owner's own recovery (backup, trustees) is the organization's recovery. Setting it up, once:
+With `ISSUER_OWNED=1` in `.env` the issuing identity is an **organization with owners**: identities, each with a weight,
+that found it and are the only ones who can recover its key or change the owners (approval of more than half of the
+declared weight). Day to day the organization runs itself: its own key, held by the verifier container, authorizes the
+signing device and replaces it later, no owner involved. If the server is lost or its key taken, the owners put a new key
+in place; the organization, its history and the attestations it issued stay valid. An owner's own recovery (backup,
+trustees) is the organization's recovery. Setting it up, once:
 
-1. Deploy with `ISSUER_OWNED=1`. The verifier starts in a waiting state and serves its key request at
+1. In the web client (`nt-node.<domain>`) create your identity, back it up and set up recovery (the banner).
+2. Put `ISSUER_OWNED=1` and `ISSUER_OWNERS=<your identity hash>` (several: `hash:weight,hash:weight`) in `.env` on the
+   server and `docker compose up -d verifier`. The verifier makes its keys and waits; its founding request is at
    `https://nt-verifier.<domain>/api/issuer/request` (also in `docker compose logs verifier`).
-2. In the web client (`nt-node.<domain>`) create your identity, back it up and set up recovery (the banner).
-3. In **Organizations you own**: create the organization, then paste the key request to authorize it (the organization's
-   own key is made in the browser and thrown away). Copy the organization hash.
-4. Put `ISSUER_ORG=<hash>` in `.env` on the server and `docker compose up -d verifier`, then
-   `docker compose restart node` (the node pins the issuer's hash at start).
-
-To replace the key later, authorize the new request the same way and revoke the old key.
+3. In the web client, **Organizations you own**: paste the request and approve it. With several owners each approves in
+   turn and passes the result on; the last one publishes it. Copy the organization hash.
+4. Put `ISSUER_ORG=<hash>` in `.env` and `docker compose up -d verifier`, then `docker compose restart node` (the node
+   pins the issuer's hash at start). The verifier has the organization authorize its signing key by itself.
 
 ## SMS codes (phone claims)
 

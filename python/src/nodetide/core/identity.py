@@ -884,10 +884,12 @@ class DeviceInfo:
 # --- Organization identities -------------------------------------------------------------------------------------
 #
 # An organization identity is owned by other (personal) identities, each with a weight. The genesis declares the owners
-# and carries the approval of every one of them; the organization's own key signs it like any genesis. From then on the
-# events that change who holds the organization's keys (rotate_master, add_device, revoke_device) and the owner set
-# itself (set_owners) are "governed": they carry signed_by == GOVERNED and no signature of their own, only owner
-# approvals. Such an event is valid when the approving owners' weights add up to MORE than half of all declared weights.
+# and carries the approval of every one of them; the organization's own key signs it like any genesis. The organization
+# runs itself with that key: devices, claims and distribution points are ordinary events signed by it, and it may
+# rotate itself. Only two things need the owners: recovering the organization's key when it is lost or taken
+# (rotate_master) and changing the owners (set_owners). Those are "governed" events: they carry signed_by == GOVERNED
+# and no signature of their own, only owner approvals (a rotate_master signed by the old key is an ordinary rotation).
+# A governed event is valid when the approving owners' weights add up to MORE than half of all declared weights.
 # The owners and weights in force are those declared before the event, so a change cannot vote itself in.
 #
 # An approval names the owner's identity and the head of the owner's chain at signing time ("state"). It is checked
@@ -899,7 +901,7 @@ class DeviceInfo:
 GOVERNED = "owners"
 MAX_OWNERS = 16
 MAX_OWNER_WEIGHT = 1_000_000
-GOVERNED_TYPES = (EventType.ROTATE_MASTER, EventType.ADD_DEVICE, EventType.REVOKE_DEVICE, EventType.SET_OWNERS)
+GOVERNED_TYPES = (EventType.ROTATE_MASTER, EventType.SET_OWNERS)
 
 ChainResolver = Callable[[str], "Sigchain | None"]
 
@@ -1374,11 +1376,7 @@ class Sigchain:
                     return False, f"Event {i}: {err}"
                 if 2 * approved <= total:
                     return False, f"Event {i}: owners approve {approved} of {total}, which is not over half"
-                if isinstance(event, AddDeviceEvent):
-                    devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
-                elif isinstance(event, RevokeDeviceEvent):
-                    revoked.add(event.device_pubkey)
-                elif isinstance(event, RotateMasterEvent):
+                if isinstance(event, RotateMasterEvent):
                     current_master = event.new_pubkey
                 elif isinstance(event, SetOwnersEvent):
                     err = check_owner_list(event.owners, resolve)
@@ -1390,8 +1388,8 @@ class Sigchain:
 
             if event.approvals:
                 return False, f"Event {i}: approvals belong on governed events only"
-            if owners is not None and (
-                event.type in GOVERNED_TYPES or event.type in (EventType.SET_RECOVERY, EventType.SOCIAL_RECOVERY)
+            if owners is not None and event.type in (
+                EventType.SET_OWNERS, EventType.SET_RECOVERY, EventType.SOCIAL_RECOVERY
             ):
                 return False, f"Event {i}: an organization's {event.type.value} is decided by its owners"
             if isinstance(event, SetOwnersEvent):
