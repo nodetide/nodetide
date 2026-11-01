@@ -3,6 +3,13 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (DNS state record)
+
+- **A short, signed snapshot of an identity's current state in DNS** (`state-record.md`): master key, active devices, head and content commitment, signed by the master key and tied to the identity by its genesis
+  and master rotations (about 1.2 KB, independent of chain length). `nodetide identity dns-record` prints the TXT record for a `dns:` distribution point. Native auth accepts an assertion against a state when
+  there is no chain or the stored one is behind (supplied by the caller, found in DNS via the chain's `dns:` point, or at a domain the caller names); `verify_assertion` was split so both paths share their checks.
+  Organizations and identities with social recovery cannot publish a state (they need other chains). Python only for now. Checked against the live resolver on our zone (multi-string TXT, absent names).
+
 ## 2026-11-02 (Android: finding a node on the LAN)
 
 - **Android browses for nodes and offers the one that serves your identity** (`RelayDiscoveryService`, Relays screen): queued resolves (NsdManager allows one at a time), announcements filtered by `Lan.fromAnnouncement`

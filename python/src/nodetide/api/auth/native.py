@@ -24,8 +24,11 @@ from nodetide.core.auth import (
     AuthResult,
     choose_sigchain,
     verify_assertion,
+    verify_assertion_with_state,
 )
+from nodetide.core.dns_source import dns_domains, dns_point
 from nodetide.core.identity import Sigchain
+from nodetide.core.state import StateError, VerifiedState, verify_state
 from nodetide.core.storage import Storage
 
 MAX_AUD_LENGTH = 512
@@ -89,6 +92,35 @@ def _resolve_sigchain(
     return chain, None
 
 
+async def _state_for(request: web.Request, identity: str, data: dict[str, Any], chain: Sigchain | None) -> VerifiedState | None:
+    """A verified state of `identity` to check the assertion against when no (fresh enough) sigchain is at hand: the one the
+    caller supplied, else the one published in DNS at a `dns:` point of the identity's own chain, or named by the caller."""
+    supplied = data.get("state")
+    if isinstance(supplied, dict):
+        try:
+            return verify_state(supplied, expect_identity=identity)
+        except StateError:
+            pass
+    domains: list[str] = []
+    if chain is not None:
+        points: list[str] = []
+        for event in chain.events:
+            points = getattr(event, "distribution_points", None) or points
+        domains = dns_domains(points)
+    hint = data.get("dns")
+    if isinstance(hint, str) and (domain := dns_point(hint if hint.lower().startswith("dns:") else f"dns:{hint}")):
+        if domain not in domains:
+            domains.append(domain)
+    source = request.app.get("dns_state")
+    if source is None:
+        return None
+    for domain in domains[:3]:
+        state = await source.fetch(domain, identity)
+        if state is not None:
+            return state
+    return None
+
+
 async def _process_assertion(
     request: web.Request,
     forced_aud: str | None = None,
@@ -121,11 +153,21 @@ async def _process_assertion(
         return _error("wrong_audience", "Challenge was not issued for this node", 401), None
 
     chain, err = _resolve_sigchain(storage, identity, data.get("sigchain"))
-    if err is not None:
+    if err is not None and err.status != 404:
         return err, None
-    assert chain is not None
 
-    result = verify_assertion(assertion, chain, expected_aud=auth_request.aud)
+    # With a chain it is the chain that decides. Without one, or when ours is behind the signer's, a signed state of the
+    # identity (supplied by the caller or published in DNS) can stand in for authentication.
+    result = verify_assertion(assertion, chain, expected_aud=auth_request.aud) if chain is not None else None
+    if result is None or result.code == _STALE:
+        state = await _state_for(request, identity, data, chain)
+        if state is not None:
+            via_state = verify_assertion_with_state(assertion, state, expected_aud=auth_request.aud)
+            if via_state.ok or result is None:
+                result = via_state
+    if result is None:
+        assert err is not None
+        return err, None
     if result.ok and assertion["exp"] > auth_request.expires_at + CLOCK_SKEW:
         result = AuthResult.fail("invalid_assertion", "Assertion outlives its challenge")
 
@@ -135,7 +177,7 @@ async def _process_assertion(
                 "stale_state",
                 result.error or "Stale sigchain",
                 409,
-                details={"head_hash": chain.head_hash, "length": len(chain.events)},
+                details={"head_hash": chain.head_hash, "length": len(chain.events)} if chain is not None else None,
             ), None
         return _error(result.code or "invalid_assertion", result.error or "Invalid", 401), None
 

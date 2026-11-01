@@ -158,6 +158,8 @@ def create_app(
     app["session_store"] = SessionStore()
     app["recovery_store"] = RecoveryStore()
     app["challenge_store"] = ChallengeStore()
+    from nodetide.core.dns_source import DnsStateSource
+    app["dns_state"] = DnsStateSource()
 
     # Origin this node authenticates users for (native SSO login). Required for
     # POST /api/auth/login; challenges for other audiences are still allowed.

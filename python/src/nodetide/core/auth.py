@@ -199,20 +199,8 @@ class AuthResult:
         return cls(ok=False, error=message, code=code)
 
 
-def verify_assertion(
-    assertion: dict[str, Any],
-    sigchain: Sigchain,
-    expected_aud: str,
-    now: int | None = None,
-) -> AuthResult:
-    """Verify an AuthAssertion against a sigchain.
-
-    Checks (spec "RP Verification"): audience, time window, sigchain validity,
-    identity match, chain_head known, device active with `authenticate`, and
-    the signature. Nonce handling (single use) is the caller's job.
-    """
-    now = int(time.time()) if now is None else now
-
+def _check_form_and_window(assertion: Any, expected_aud: str, now: int) -> AuthResult | None:
+    """The checks that need no identity data: shape, audience, time window. None when they pass."""
     if not isinstance(assertion, dict):
         return AuthResult.fail("invalid_assertion", "Assertion must be an object")
     if assertion.get("type") != AUTH_ASSERTION_TYPE:
@@ -239,27 +227,16 @@ def verify_assertion(
         return AuthResult.fail("expired", "Assertion issued in the future")
     if now > exp + CLOCK_SKEW:
         return AuthResult.fail("expired", "Assertion expired")
+    return None
 
-    # 2. Sigchain verifies from genesis and belongs to the claimed identity
-    valid, err = sigchain.verify()
-    if not valid:
-        return AuthResult.fail("invalid_sigchain", err or "Invalid sigchain")
-    if sigchain.identity_hash != assertion["identity"]:
-        return AuthResult.fail("invalid_assertion", "Sigchain does not match identity")
 
-    # 3. chain_head must be in the chain we hold (else our chain is stale)
-    known_hashes = {e.event_hash() for e in sigchain.events}
-    if assertion["chain_head"] not in known_hashes:
-        return AuthResult.fail(
-            "unknown_chain_head",
-            "Signer knows a sigchain event we do not; fetch a newer sigchain",
-        )
-
-    # 4. Device is active, is not the master key, and holds `authenticate`
+def _check_device_and_signature(assertion: dict[str, Any], master_key: str | None, devices: list[Any], now: int) -> AuthResult:
+    """Device is active, is not the master key, holds `authenticate`; then the signature."""
+    iat = assertion["iat"]
     device_hex = assertion["device"]
-    if device_hex == sigchain.get_current_master_key():
+    if device_hex == master_key:
         return AuthResult.fail("device_not_authorized", "Master key may not sign assertions")
-    device = next((d for d in sigchain.get_active_devices(now) if d.pubkey == device_hex), None)
+    device = next((d for d in devices if d.pubkey == device_hex), None)
     if device is None:
         return AuthResult.fail("device_not_authorized", "Device is not active")
     if DeviceCapability.AUTHENTICATE.value not in device.capabilities:
@@ -280,5 +257,67 @@ def verify_assertion(
         ok=True,
         identity=assertion["identity"],
         device=device_hex,
-        claims=claims,
+        claims=assertion.get("claims", {}),
     )
+
+
+def verify_assertion(
+    assertion: dict[str, Any],
+    sigchain: Sigchain,
+    expected_aud: str,
+    now: int | None = None,
+) -> AuthResult:
+    """Verify an AuthAssertion against a sigchain.
+
+    Checks (spec "RP Verification"): audience, time window, sigchain validity,
+    identity match, chain_head known, device active with `authenticate`, and
+    the signature. Nonce handling (single use) is the caller's job.
+    """
+    now = int(time.time()) if now is None else now
+
+    early = _check_form_and_window(assertion, expected_aud, now)
+    if early is not None:
+        return early
+
+    # 2. Sigchain verifies from genesis and belongs to the claimed identity
+    valid, err = sigchain.verify()
+    if not valid:
+        return AuthResult.fail("invalid_sigchain", err or "Invalid sigchain")
+    if sigchain.identity_hash != assertion["identity"]:
+        return AuthResult.fail("invalid_assertion", "Sigchain does not match identity")
+
+    # 3. chain_head must be in the chain we hold (else our chain is stale)
+    known_hashes = {e.event_hash() for e in sigchain.events}
+    if assertion["chain_head"] not in known_hashes:
+        return AuthResult.fail(
+            "unknown_chain_head",
+            "Signer knows a sigchain event we do not; fetch a newer sigchain",
+        )
+
+    return _check_device_and_signature(assertion, sigchain.get_current_master_key(), sigchain.get_active_devices(now), now)
+
+
+def verify_assertion_with_state(
+    assertion: dict[str, Any],
+    state: Any,
+    expected_aud: str,
+    now: int | None = None,
+) -> AuthResult:
+    """Verify an AuthAssertion against a signed *state* (core/state.py) instead of a whole sigchain.
+
+    `state` is a VerifiedState: the identity's current master and devices, vouched for by the master key. The assertion's
+    chain_head must be exactly the state's head: with only a snapshot we cannot tell an older head from a forged one.
+    """
+    now = int(time.time()) if now is None else now
+
+    early = _check_form_and_window(assertion, expected_aud, now)
+    if early is not None:
+        return early
+    if state.identity_hash != assertion["identity"]:
+        return AuthResult.fail("invalid_assertion", "State does not match identity")
+    if assertion["chain_head"] != state.head_hash:
+        return AuthResult.fail(
+            "unknown_chain_head",
+            "Signer's chain head differs from the published state; fetch the sigchain",
+        )
+    return _check_device_and_signature(assertion, state.get_current_master_key(), state.get_active_devices(now), now)

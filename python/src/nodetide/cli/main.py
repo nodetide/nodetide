@@ -21,10 +21,13 @@ from nodetide.content.mime import create_text_message
 
 def checked_points(points: tuple[str, ...]) -> list[str]:
     """Distribution points as given, but a mailto: one must be a plain address (what readers will accept)."""
+    from nodetide.core.dns_source import dns_point
     from nodetide.mailresponder.addresses import mailto_address
     for point in points:
         if point.strip()[:7].lower() == "mailto:" and mailto_address(point) is None:
             raise click.BadParameter(f"{point!r}: use a single plain address, like mailto:chains@node.example (no ?subject=, name or list)")
+        if point.strip()[:4].lower() == "dns:" and dns_point(point) is None:
+            raise click.BadParameter(f"{point!r}: use a public domain name, like dns:example.org")
     return list(points)
 
 
@@ -249,6 +252,55 @@ def identity_set_distribution(distribution: tuple[str, ...]):
     click.echo("Updated distribution points:")
     for dp in dist_points:
         click.echo(f"  - {dp}")
+
+
+@identity.command("dns-record")
+@click.option("--domain", "-d", help="The domain you publish under (default: the first dns: distribution point)")
+@click.option("--valid-days", type=int, default=7, show_default=True, help="How long verifiers may rely on the record before it must be republished")
+@click.option("--json", "as_json", is_flag=True, help="Print the record as JSON")
+def identity_dns_record(domain: str | None, valid_days: int, as_json: bool):
+    """Print the DNS TXT record that publishes this identity's CURRENT state (not its chain).
+
+    The record is short (master key, active devices, chain head) and signed by your master key, so DNS itself needs no
+    trust. Republish it whenever devices change, and before it expires: a verifier that finds an old or missing record
+    simply falls back to the sigchain.
+
+    Example:
+      nodetide identity set-distribution -d dns:example.org
+      nodetide identity dns-record
+    """
+    from nodetide.core.dns_source import dns_domains, record_name
+    from nodetide.core.state import StateError, build_state, encode, txt_strings
+
+    storage = get_storage()
+    ident = get_default_identity(storage)
+    if not ident or ident.local_keypair is None:
+        raise click.ClickException("No default identity with its master key on this machine.")
+    chain = ident.sigchain
+    if domain is None:
+        points: list[str] = []
+        for event in chain.events:
+            points = getattr(event, "distribution_points", None) or points
+        known = dns_domains(points)
+        if not known:
+            raise click.ClickException("No dns: distribution point. Add one (nodetide identity set-distribution -d dns:example.org) or pass --domain.")
+        domain = known[0]
+    elif dns_domains([f"dns:{domain}"]) == []:
+        raise click.ClickException(f"{domain!r} is not a public domain name")
+    try:
+        text = encode(build_state(chain, ident.local_keypair, validity=valid_days * 86400))
+    except StateError as e:
+        raise click.ClickException(str(e))
+    name = record_name(domain, chain.identity_hash)
+    if as_json:
+        click.echo(json.dumps({"name": name, "type": "TXT", "value": text, "strings": txt_strings(text)}, indent=2))
+        return
+    click.echo(f"Name:  {name}")
+    click.echo("Type:  TXT")
+    click.echo(f"Size:  {len(text)} characters")
+    click.echo("Value: " + " ".join(f'"{part}"' for part in txt_strings(text)))
+    if f"dns:{domain}" not in [p for e in chain.events for p in (getattr(e, "distribution_points", None) or [])]:
+        click.echo(f"\nNote: add the distribution point so others know where to look: nodetide identity set-distribution -d dns:{domain}")
 
 
 @identity.command("set-recovery")
