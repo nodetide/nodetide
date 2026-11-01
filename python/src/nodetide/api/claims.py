@@ -141,7 +141,7 @@ async def post_document(request: web.Request) -> web.Response:
     chain = storage.get_sigchain(identity)
     if chain is None:
         return error("not_found", f"Identity {identity} not found", 404)
-    valid, err = chain.verify()
+    valid, err = chain.verify(storage.get_sigchain)
     if not valid:
         return error("invalid_sigchain", err or "Invalid sigchain", 400)
 
@@ -224,7 +224,7 @@ async def post_attestation(request: web.Request) -> web.Response:
         if err is not None:
             return err
 
-    check = verify_attestation(att, subject_chain, issuer_chain)
+    check = verify_attestation(att, subject_chain, issuer_chain, resolve=storage.get_sigchain)
     if not check.ok:
         status = _STATUS_FOR_CODE.get(check.code or "", 422)
         details = {"head_hash": subject_chain.head_hash} if check.code == "unknown_chain_head" else None
@@ -283,7 +283,7 @@ async def post_revocation(request: web.Request) -> web.Response:
     issuer_chain, err = resolve_chain(storage, rev.issuer, data.get("issuer_sigchain"))
     if err is not None:
         return err
-    check = verify_revocation(rev, issuer_chain)
+    check = verify_revocation(rev, issuer_chain, resolve=storage.get_sigchain)
     if not check.ok:
         return error(check.code or "invalid_revocation", check.error or "Invalid revocation",
                      _STATUS_FOR_CODE.get(check.code or "", 422))
@@ -329,7 +329,7 @@ async def verify_claim(request: web.Request) -> web.Response:
 
     # Proof checks may use the network (revocation); keep that off the event loop.
     check = await asyncio.get_running_loop().run_in_executor(
-        None, verify_attestation, att, subject_chain, issuer_chain
+        None, lambda: verify_attestation(att, subject_chain, issuer_chain, resolve=storage.get_sigchain)
     )
     if not check.ok:
         return fail(check.code or "invalid_attestation", check.error or "Invalid attestation",

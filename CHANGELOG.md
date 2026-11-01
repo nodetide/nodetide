@@ -26,6 +26,13 @@ still open, so a new session can pick up without re-deriving context.
   shows a recovery code for the trustees, and on completion publishes the recovery, adds a device and keeps the identity (it needs a new backup
   afterwards). The headless-Chrome test covers losing keys twice and a browser identity vouching for a Python one.
 
+- **Owned issuer** (`verifiers/issuer.py`, `ISSUER_OWNED=1`): the verifier holds only a signing device key (table `issuer_device`) and serves its public
+  request at `/api/issuer/request`; the organization (created and authorized in the web client, card "Organizations you own"; its own key is made in the
+  browser and thrown away) is fetched from `NODETIDE_ISSUER_NODE` with its owners' chains, verified, and used once it lists the key. Until then the
+  service only waits and serves the request. `verify_attestation`, `verify_revocation`, `evaluate_claim`, the claims API, the OIDC provider, the identity
+  fetcher (which also fetches missing owner chains) and the explorer now pass the node's storage as resolver. The issuer info carries `owner_sigchains`.
+- Test stack: `ISSUER_OWNED`, `ISSUER_ORG` in `.env` (README "Owned issuer"); default stays the old self-made issuer.
+
 ### Open
 - Backup trustees and the test wallet app (`deploy/test/wallet`) have no recovery UI yet; recovery restores control of the identity, not claim values.
 - Other `verify()` callers (claims, auth, explorer, OIDC, relay, daemon, email verifier) do not pass a resolver yet, so an owned organization fails there

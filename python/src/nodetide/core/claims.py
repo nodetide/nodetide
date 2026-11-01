@@ -529,15 +529,18 @@ def verify_attestation(
     subject_chain: Sigchain,
     issuer_chain: Sigchain | None = None,
     now: int | None = None,
+    resolve: Callable[[str], Sigchain | None] | None = None,
 ) -> Check:
     """Check an attestation against the holder's chain (and the issuer's, if issued).
+
+    `resolve` (identity hash -> sigchain) is needed to check an issuer that is an organization with owners.
 
     Does not check revocation by the issuer (see AttestationRevocation) or
     whether the relying party trusts the issuer: that is policy.
     """
     now = int(time.time()) if now is None else now
 
-    valid, err = subject_chain.verify()
+    valid, err = subject_chain.verify(resolve)
     if not valid:
         return Check.fail("invalid_sigchain", err or "Invalid subject sigchain")
     if subject_chain.identity_hash != att.subject:
@@ -567,7 +570,7 @@ def verify_attestation(
 
     if issuer_chain is None:
         return Check.fail("unknown_issuer", "The issuer's sigchain is not available")
-    valid, err = issuer_chain.verify()
+    valid, err = issuer_chain.verify(resolve)
     if not valid:
         return Check.fail("invalid_sigchain", err or "Invalid issuer sigchain")
     assert att.issuer and att.signed_by and att.sig
@@ -579,9 +582,12 @@ def verify_attestation(
     return Check(True)
 
 
-def verify_revocation(rev: AttestationRevocation, issuer_chain: Sigchain, now: int | None = None) -> Check:
+def verify_revocation(
+    rev: AttestationRevocation, issuer_chain: Sigchain, now: int | None = None,
+    resolve: Callable[[str], Sigchain | None] | None = None,
+) -> Check:
     now = int(time.time()) if now is None else now
-    valid, err = issuer_chain.verify()
+    valid, err = issuer_chain.verify(resolve)
     if not valid:
         return Check.fail("invalid_sigchain", err or "Invalid issuer sigchain")
     key_check = issuer_key_check(issuer_chain, rev.issuer, rev.signed_by, now)

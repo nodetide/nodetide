@@ -384,7 +384,8 @@ class OIDCProvider:
             revoked = self.storage.get_attestation_revocation(attestation.id) is not None
 
             outcome = await loop.run_in_executor(None, lambda: evaluate_claim(
-                rule, document, attestation, chain, issuer_chain, revoked=revoked, now=self._now()))
+                rule, document, attestation, chain, issuer_chain, revoked=revoked, now=self._now(),
+                resolve=self.storage.get_sigchain))
             if outcome.claim is None:
                 report["rejected"].append({"claim_type": claim_type, "code": outcome.code})
                 continue

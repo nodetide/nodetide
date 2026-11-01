@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -36,7 +37,7 @@ from nodetide.verifiers.config import (
 )
 from nodetide.verifiers.eid_notary import EidNotary
 from nodetide.verifiers.email_verifier import CodeVerifier
-from nodetide.verifiers.issuer import NodeIssuer
+from nodetide.verifiers.issuer import IssuerNotReady, NodeIssuer, device_request, load_owned
 from nodetide.verifiers.sms import SmsOutbox
 
 logger = logging.getLogger("nodetide.verifier")
@@ -109,6 +110,24 @@ def create_verifier_app(
     return app
 
 
+async def issuer_request(request: web.Request) -> web.Response:
+    """GET /api/issuer/request - the public data of the signing key, for the organization's owners to authorize."""
+    return web.json_response(request.app["issuer_request"])
+
+
+def run_pending(storage: Storage, name: str, reason: str, host: str, port: int) -> None:
+    """The issuer is owned but not authorized yet: serve the key request (and only that) until it is, then restart."""
+    body = device_request(storage, name)
+    logger.warning("not issuing yet: %s", reason)
+    logger.warning("device request for the owners: %s", json.dumps(body))
+    app = web.Application()
+    app["issuer_request"] = {**body, "status": "pending", "reason": reason}
+    app.router.add_get("/health", health)
+    app.router.add_get("/", issuer_request)
+    app.router.add_get("/api/issuer/request", issuer_request)
+    web.run_app(app, host=host, port=port, print=None)
+
+
 def publish_issuer(verifier: CodeVerifier | NodeIssuer, target: str | None) -> None:
     if target:
         issuer = getattr(verifier, "issuer", verifier)
@@ -128,7 +147,15 @@ def main() -> None:
     home = Path(os.environ.get("NODETIDE_VERIFIER_HOME") or Path.home() / ".nodetide-verifier")
     home.mkdir(parents=True, exist_ok=True)
     storage = Storage.open(home / "verifier.db")
-    issuer = NodeIssuer.load_or_create(storage, os.environ.get("NODETIDE_ISSUER_NAME", "Nodetide verifier"))
+    issuer_name = os.environ.get("NODETIDE_ISSUER_NAME", "Nodetide verifier")
+    if os.environ.get("NODETIDE_ISSUER_OWNED") == "1":
+        try:
+            issuer = load_owned(storage, issuer_name, os.environ.get("NODETIDE_ISSUER_ORG"), os.environ.get("NODETIDE_ISSUER_NODE"))
+        except IssuerNotReady as e:
+            run_pending(storage, issuer_name, str(e), args.host, args.port)
+            return
+    else:
+        issuer = NodeIssuer.load_or_create(storage, issuer_name)
     try:
         verifiers: list[CodeVerifier] = []
         email = build_email_verifier(storage, audience, required=True, issuer=issuer) if smtp_configured() else None
@@ -151,6 +178,9 @@ def main() -> None:
     logger.info("issuer %s (%s), audience %s, verifying: %s", issuer.identity_hash, issuer.name, audience,
                 ", ".join([v.claim_type for v in verifiers] + (["eID notary"] if notary else [])))
     app = create_verifier_app(storage, verifiers, audience, outbox=outbox, gateway_token_digest=digest, notary=notary)
+    if os.environ.get("NODETIDE_ISSUER_OWNED") == "1":
+        app["issuer_request"] = {**device_request(storage, issuer_name), "status": "authorized", "organization": issuer.identity_hash}
+        app.router.add_get("/api/issuer/request", issuer_request)
     web.run_app(app, host=args.host, port=args.port, print=None)
 
 

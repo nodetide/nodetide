@@ -102,6 +102,7 @@ def evaluate_claim(
     *,
     revoked: bool = False,
     now: int | None = None,
+    resolve=None,
 ) -> Evaluation:
     """Apply `rule` to a presented claim. Blocking when the attestation is a proof
     (it may consult revocation services): call it from an executor in async code."""
@@ -131,7 +132,7 @@ def evaluate_claim(
     if rule.reject_if_recovered and recovered_since(subject_chain, attestation.chain_head):
         return Evaluation.fail("recovered_since", "The identity was recovered after this was verified; verify again")
 
-    check: Check = verify_attestation(attestation, subject_chain, issuer_chain, now)
+    check: Check = verify_attestation(attestation, subject_chain, issuer_chain, now, resolve)
     if not check.ok:
         return Evaluation.fail(check.code or "invalid_attestation", check.error or "Invalid attestation")
 

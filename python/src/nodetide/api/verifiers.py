@@ -71,6 +71,12 @@ async def issuer_info(request: web.Request) -> web.Response:
         "audience": request.app.get("auth_audience"),
         # so a holder can present its attestations anywhere without a lookup
         "sigchain": issuer.identity.sigchain.to_list(),
+        # an organization with owners is checked against their chains
+        "owner_sigchains": {
+            o["identity"]: chain.to_list()
+            for o in (issuer.identity.sigchain.get_owners() or [])
+            if (chain := request.app["storage"].get_sigchain(o["identity"])) is not None
+        },
         "methods": [{
             "method": v.method,
             "claim_type": v.claim_type,

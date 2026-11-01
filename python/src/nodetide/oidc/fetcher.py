@@ -171,8 +171,13 @@ class IdentityFetcher:
             chain = Sigchain.from_list(events)
         except Exception:
             return False
-        valid, _ = chain.verify()
+        valid, _ = chain.verify(self._storage.get_sigchain)
         if not valid or chain.identity_hash != identity_hash:
+            # An organization is checked against its owners' chains: fetch the ones we lack, then this one is retried
+            for owner in chain.get_owners() or []:
+                identity = owner.get("identity") if isinstance(owner, dict) else None
+                if isinstance(identity, str) and IDENTITY_RE.match(identity) and self._storage.get_sigchain(identity) is None:
+                    self.schedule(identity, [])
             return False
 
         stored = self._storage.get_sigchain(identity_hash)

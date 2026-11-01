@@ -68,6 +68,11 @@ services:
       NODETIDE_VERIFIER_HOME: /data
       NODETIDE_VERIFIER_PUBLISH_ISSUER: /share/email-issuer
       NODETIDE_ISSUER_NAME: Nodetide test email verifier
+      # ISSUER_OWNED=1: the issuer is an organization its OWNERS control; this container holds only a signing key they
+      # authorize (see README "Owned issuer"). Empty = the old behaviour: the verifier makes and holds its own identity.
+      NODETIDE_ISSUER_OWNED: ${ISSUER_OWNED:-}
+      NODETIDE_ISSUER_ORG: ${ISSUER_ORG:-}
+      NODETIDE_ISSUER_NODE: ${NODE_URL}
       # mail goes to the catch-all mailbox below unless SMTP_HOST is set in .env (then to the real recipient)
       NODETIDE_SMTP_HOST: ${SMTP_HOST:-mailpit}
       NODETIDE_SMTP_PORT: ${SMTP_PORT:-1025}

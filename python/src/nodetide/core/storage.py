@@ -176,6 +176,15 @@ CREATE TABLE IF NOT EXISTS node_issuer (
     created_at INTEGER NOT NULL
 );
 
+-- The signing device of an issuer that is OWNED by other identities (the owners authorize this key; no master key here)
+CREATE TABLE IF NOT EXISTS issuer_device (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    device_signing_key TEXT NOT NULL,
+    device_pubkey TEXT NOT NULL,
+    device_encryption_pubkey TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
 -- Explorer index (derived from sigchains; safe to rebuild)
 CREATE TABLE IF NOT EXISTS explorer_identities (
     identity_hash TEXT PRIMARY KEY,
@@ -801,6 +810,22 @@ class Storage:
                 """,
                 (identity_hash, master_signing_key, master_encryption_key,
                  device_pubkey, device_signing_key, int(time.time())),
+            )
+
+    def get_issuer_device(self) -> dict | None:
+        with self.transaction() as cur:
+            cur.execute("SELECT * FROM issuer_device WHERE id = 1")
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+    def save_issuer_device(self, signing_key: str, pubkey: str, encryption_pubkey: str) -> None:
+        import time
+
+        with self.transaction() as cur:
+            cur.execute(
+                "INSERT OR IGNORE INTO issuer_device (id, device_signing_key, device_pubkey, device_encryption_pubkey, created_at)"
+                " VALUES (1, ?, ?, ?, ?)",
+                (signing_key, pubkey, encryption_pubkey, int(time.time())),
             )
 
     def set_default_identity(self, identity_hash: str) -> bool:

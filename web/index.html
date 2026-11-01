@@ -1290,6 +1290,39 @@
         <button class="btn" @click="save">Save Settings</button>
       </div>
 
+      <div class="card" x-data="protectionUI">
+        <div class="card-header">
+          <span class="card-title">Organizations you own</span>
+        </div>
+        <p class="text-small text-muted mb-1">
+          An organization (a verification service, say) is owned by your active identity: only you can change its keys.
+          Leave the organization hash empty to create a new one; paste a verifier's device request to authorize its signing key.
+        </p>
+        <form @submit.prevent="createOrganization">
+          <div class="form-group">
+            <label>Organization hash (empty = create a new one)</label>
+            <input type="text" x-model="org.orgHash" placeholder="64 hex characters">
+          </div>
+          <div class="form-group" x-show="!org.orgHash.trim()">
+            <label>Name of the new organization</label>
+            <input type="text" x-model="org.name">
+          </div>
+          <div class="form-group">
+            <label>Device request (JSON from the verifier's /api/issuer/request; optional when creating)</label>
+            <textarea x-model="org.request" rows="4"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Active identity's password (signs as owner)</label>
+            <input type="password" x-model="org.password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn" :disabled="$store.app.loading">Sign and publish</button>
+        </form>
+        <template x-if="org.result">
+          <p class="text-small mt-1">Organization hash (for the verifier's NODETIDE_ISSUER_ORG):<br>
+            <code x-text="org.result.orgHash" style="word-break: break-all"></code></p>
+        </template>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <span class="card-title">Identity Dump/Restore</span>

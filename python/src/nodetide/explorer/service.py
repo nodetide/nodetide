@@ -134,7 +134,7 @@ class Explorer:
         if chain is None or genesis is None:
             return None
 
-        valid, error = chain.verify()
+        valid, error = chain.verify(self.storage.get_sigchain)
         now = int(time.time())
 
         distribution_points: list[str] = []
