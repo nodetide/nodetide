@@ -95,6 +95,11 @@ def test_authentication_results_must_come_from_our_server_and_match_the_from_dom
     forged = msg(["attacker.test; dmarc=pass"])
     assert authenticated(forged) and not authenticated(forged, trusted_servers=["mx.node.example"])
     assert authenticated(msg(["MX.node.example; dmarc=pass"]), trusted_servers=["mx.node.example"])
+    # our server's result is the topmost header; a forged one with the same name sits below it and must not rescue a failure
+    ours_fail_forged_pass = msg(["mx.node.example; dmarc=fail header.from=example.org", "mx.node.example; dmarc=pass header.from=example.org"])
+    assert not authenticated(ours_fail_forged_pass) and not authenticated(ours_fail_forged_pass, trusted_servers=["mx.node.example"])
+    # and a forged header above ours can only be the attacker's: refused when the topmost is not from a trusted server
+    assert not authenticated(msg(["evil.test; dmarc=pass", "mx.node.example; dmarc=pass header.from=example.org"]), trusted_servers=["mx.node.example"])
 
 
 def test_sender_is_the_single_from_address_never_reply_to():

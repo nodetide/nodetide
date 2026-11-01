@@ -45,6 +45,7 @@ class SMTPSender:
         from_addr: str = "",
         security: str = "starttls",  # starttls | ssl | none
         timeout: int = 20,
+        ca_file: str | None = None,  # trust this certificate (a server with its own self-signed one) instead of the system roots
     ):
         if security not in ("starttls", "ssl", "none"):
             raise ValueError("security must be starttls, ssl or none")
@@ -52,10 +53,10 @@ class SMTPSender:
             raise ValueError("a from address is required")
         self.host, self.port = host, port
         self.username, self.password = username, password
-        self.from_addr, self.security, self.timeout = from_addr, security, timeout
+        self.from_addr, self.security, self.timeout, self.ca_file = from_addr, security, timeout, ca_file
 
     def _send_blocking(self, message: EmailMessage) -> None:
-        context = ssl.create_default_context()
+        context = ssl.create_default_context(cafile=self.ca_file)
         if self.security == "ssl":
             server: smtplib.SMTP = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout, context=context)
         else:

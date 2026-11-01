@@ -11,7 +11,9 @@ still open, so a new session can pick up without re-deriving context.
   does not verify or is incomplete.
 - **Abuse controls**: answers only mail our own server found genuine (SPF/DKIM/DMARC from `Authentication-Results`, optionally only from named servers), only to the single From address (never
   Reply-To), never to automatic or list mail or to itself, once per Message-ID, with limits per sender, per domain, overall, and a byte budget per sender; requests are size-capped and the grammar
-  is strict. Off unless `NODETIDE_MAIL_RESPONDER=1`; reads its mailbox over IMAP, replies through SMTP. Not switched on at the test stack: it needs a mailbox.
+  is strict. Off unless `NODETIDE_MAIL_RESPONDER=1`; reads its mailbox over IMAP, replies through SMTP. Only the topmost `Authentication-Results` header is believed (a forged one with our server's name survives below it).
+- **Mail stack for the test server** (profile `mail`, docker-mailserver 16.0.1; `deploy/test/README.md`): port 25 open, IMAP/submission internal with a pinned self-signed certificate; Terraform publishes `nt-mail` A/AAAA, MX, SPF, DKIM
+  (key from Terraform state, installed by the deploy job), DMARC and the reverse DNS. Checked locally against the real image: inbound verdict headers, DKIM-signed submission, TLS pinning.
 
 ## 2026-11-02 (Android release signing)
 

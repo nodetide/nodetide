@@ -68,3 +68,9 @@ variable "labels" {
   type        = map(string)
   default     = {}
 }
+
+variable "mail_enabled" {
+  description = "Publish the mail records (MX, SPF, DKIM, DMARC, reverse DNS) and open port 25 for the sigchain responder's mailbox. Needs dns_zone and domain."
+  type        = bool
+  default     = true
+}

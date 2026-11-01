@@ -43,22 +43,19 @@ services:
       # answers requests for sigchains that arrive by email (see email-distribution.md); off unless MAIL_RESPONDER=1
       NODETIDE_MAIL_RESPONDER: ${MAIL_RESPONDER:-0}
       NODETIDE_MAIL_ADDRESS: ${MAIL_ADDRESS:-}
-      NODETIDE_MAIL_IMAP_HOST: ${MAIL_IMAP_HOST:-}
-      NODETIDE_MAIL_IMAP_PORT: ${MAIL_IMAP_PORT:-993}
-      NODETIDE_MAIL_IMAP_SECURITY: ${MAIL_IMAP_SECURITY:-ssl}
-      NODETIDE_MAIL_IMAP_USER: ${MAIL_IMAP_USER:-}
-      NODETIDE_MAIL_IMAP_PASSWORD: ${MAIL_IMAP_PASSWORD:-}
-      NODETIDE_MAIL_TRUSTED_SERVERS: ${MAIL_TRUSTED_SERVERS:-}
-      NODETIDE_SMTP_HOST: ${SMTP_HOST:-mailpit}
-      NODETIDE_SMTP_PORT: ${SMTP_PORT:-1025}
-      NODETIDE_SMTP_SECURITY: ${SMTP_SECURITY:-none}
-      NODETIDE_SMTP_USER: ${SMTP_USER:-}
-      NODETIDE_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      # This node verifies nobody. It believes email attestations only from the verification service named in
-      # /issuer/email-issuer (written by the verifier container; the entrypoint passes it on as NODETIDE_OIDC_EMAIL_ISSUERS).
+      NODETIDE_MAIL_IMAP_HOST: mail
+      NODETIDE_MAIL_IMAP_USER: ${MAIL_ADDRESS:-}
+      NODETIDE_MAIL_IMAP_PASSWORD: ${MAIL_PASSWORD:-}
+      NODETIDE_MAIL_SMTP_HOST: mail
+      NODETIDE_MAIL_SMTP_PORT: "587"
+      NODETIDE_MAIL_SMTP_USER: ${MAIL_ADDRESS:-}
+      NODETIDE_MAIL_SMTP_PASSWORD: ${MAIL_PASSWORD:-}
+      NODETIDE_MAIL_CA_FILE: /mail-ca/cert.pem                # the mail server's own certificate, pinned
+      NODETIDE_MAIL_TRUSTED_SERVERS: ${MAIL_HOST:-}           # only this server's Authentication-Results are believed
     volumes:
       - node-data:/data
       - issuer-share:/issuer:ro
+      - mail-ca:/mail-ca:ro
       - ./config:/config:ro
     ports:
       - "127.0.0.1:${NODE_PORT:-4570}:4557"
@@ -235,6 +232,54 @@ services:
         condition: service_started
         required: false   # only present with the edge profile
 
+  # Mail for the sigchain responder (profile "mail"): receives on port 25 from the internet, checks SPF/DKIM/DMARC of what
+  # arrives, signs what the node sends. IMAP (993) and submission (587) are reachable inside the compose network only.
+  mail:
+    image: ghcr.io/docker-mailserver/docker-mailserver:16.0.1
+    profiles: ["mail"]
+    restart: unless-stopped
+    hostname: ${MAIL_HOST:-mail.invalid}
+    entrypoint: ["/bin/bash", "/mail-init.sh"]
+    environment:
+      MAIL_HOST: ${MAIL_HOST:-mail.invalid}
+      MAIL_DOMAIN: ${MAIL_DOMAIN:-invalid}
+      MAIL_ADDRESS: ${MAIL_ADDRESS:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      OVERRIDE_HOSTNAME: ${MAIL_HOST:-mail.invalid}
+      ENABLE_RSPAMD: 0
+      ENABLE_AMAVIS: 0
+      ENABLE_CLAMAV: 0
+      ENABLE_SPAMASSASSIN: 0
+      ENABLE_FAIL2BAN: 0
+      ENABLE_POSTGREY: 0
+      ENABLE_OPENDKIM: 1
+      ENABLE_OPENDMARC: 1
+      ENABLE_POLICYD_SPF: 1
+      SPOOF_PROTECTION: 1
+      PERMIT_DOCKER: none
+      ONE_DIR: 1
+      SSL_TYPE: manual
+      SSL_CERT_PATH: /etc/mail-tls/cert.pem
+      SSL_KEY_PATH: /etc/mail-tls/key.pem
+      POSTMASTER_ADDRESS: ${MAIL_ADDRESS:-}
+      ENABLE_UPDATE_CHECK: 0
+    volumes:
+      - mail-data:/var/mail
+      - mail-state:/var/mail-state
+      - mail-config:/tmp/docker-mailserver
+      - mail-tls:/etc/mail-tls
+      - mail-ca:/mail-ca
+      - ./mail/init.sh:/mail-init.sh:ro
+      - ./dkim:/dkim:ro
+    ports:
+      - "25:25"
+    healthcheck:
+      test: ["CMD", "dms-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
   # Optional: terminates TLS (Let's Encrypt) for the three host names. Needs ports 80/443 free.
   edge:
     image: caddy:2
@@ -263,3 +308,8 @@ volumes:
   wallet-data:
   grafana-data:
   caddy-data:
+  mail-data:
+  mail-state:
+  mail-config:
+  mail-tls:
+  mail-ca:

@@ -48,6 +48,7 @@ identity-*.json
 
 # Test stack: secrets, generated config, trust anchors (certificates), smoke-test keys
 deploy/test/.env
+deploy/test/dkim/
 deploy/test/config/
 deploy/test/.smoke/
 deploy/test/anchors/*

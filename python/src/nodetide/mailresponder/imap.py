@@ -16,12 +16,14 @@ class ImapMailbox:
     so a crash loses a request (the client asks again) instead of answering it twice."""
 
     def __init__(self, host: str, port: int = 993, username: str = "", password: str = "", security: str = "ssl",
-                 folder: str = "INBOX", max_bytes: int = 256 * 1024, batch: int = 20, timeout: int = 30):
+                 folder: str = "INBOX", max_bytes: int = 256 * 1024, batch: int = 20, timeout: int = 30,
+                 ca_file: str | None = None):
         self.host, self.port, self.username, self.password = host, port, username, password
         self.security, self.folder, self.max_bytes, self.batch, self.timeout = security, folder, max_bytes, batch, timeout
+        self.ca_file = ca_file
 
     def _connect(self) -> imaplib.IMAP4:
-        context = ssl.create_default_context()
+        context = ssl.create_default_context(cafile=self.ca_file)
         if self.security == "ssl":
             box: imaplib.IMAP4 = imaplib.IMAP4_SSL(self.host, self.port, ssl_context=context, timeout=self.timeout)
         else:

@@ -36,6 +36,8 @@ refuses an incomplete set.
 
 * Only mail that the node's own mail server marked genuine: `Authentication-Results` with `dmarc=pass`, or `dkim=pass`/`spf=pass` for the From domain. With `NODETIDE_MAIL_TRUSTED_SERVERS` only headers
   written by those servers count (otherwise an outsider could add one).
+* Only the **topmost** `Authentication-Results` header counts (and it must come from a trusted server when those are named): a mail server's milter prepends its verdict, but a header an outsider
+  forged *with our server's name* is not removed and sits below it. Found by testing against a real docker-mailserver; covered by a test.
 * Only to the single From address, never Reply-To. No reply to `Auto-Submitted`, `Precedence: bulk|list|junk`, list headers, a null return path, system senders, or ourselves.
 * Each Message-ID once. Limits per sender (20/hour), per domain (100/hour), overall (600/hour), and a byte budget per sender (20 MB/hour); a refused request costs nothing against the other limits.
 * Requests over 256 KB are dropped unread. Nothing in a request is executed or fetched.

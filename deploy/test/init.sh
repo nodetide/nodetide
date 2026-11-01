@@ -70,6 +70,19 @@ ENV
         printf '\nSMS_GATEWAY_TOKEN=%s\n' "$(secret 32)" >> .env
         echo "added the SMS gateway token (SMS_GATEWAY_TOKEN)"
     fi
+    if ! grep -q '^MAIL_PASSWORD=' .env && [ "${ALLOW_INSECURE:-0}" = 0 ]; then
+        cat >> .env <<ENV
+
+# mail for the sigchain responder (needs DNS: MX/SPF/DKIM records and the name nt-mail.$BASE, see terraform)
+MAIL_DOMAIN=$BASE
+MAIL_HOST=nt-mail.$BASE
+MAIL_ADDRESS=chains@$BASE
+MAIL_PASSWORD=$(secret 24)
+MAIL_RESPONDER=1
+ENV
+        sed -i.bak -E 's/^COMPOSE_PROFILES=(.*)$/COMPOSE_PROFILES=\1,mail/; s/^COMPOSE_PROFILES=,/COMPOSE_PROFILES=/' .env && rm -f .env.bak
+        echo "added the mail responder settings (chains@$BASE) and the mail profile"
+    fi
     . ./.env
     # config/ is not kept anywhere else: rebuild it from the secrets in .env
     write_clients "$OIDC_CLIENT_SECRET" "$GRAFANA_CLIENT_SECRET" "$RP_URL" "$GRAFANA_URL"

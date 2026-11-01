@@ -153,6 +153,20 @@ jobs:
             echo "::error::no TEST_DOMAIN variable: a public server needs a domain (see README)"; exit 1
           fi
 
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "~> 1.12"
+          terraform_wrapper: false
+
+      - name: DKIM key for the mail responder (from the Terraform state; the public half is in DNS)
+        working-directory: deploy/test/terraform
+        run: |
+          terraform init -no-color >/dev/null
+          umask 077
+          mkdir -p ../dkim
+          terraform output -raw dkim_private_key > ../dkim/private.pem
+          test -s ../dkim/private.pem || { echo "no DKIM key in the state: mail goes out unsigned"; rm -f ../dkim/private.pem; }
+
       - name: Fetch the eID trust anchors (published links, pinned fingerprints, checked against the trusted list)
         working-directory: deploy/test
         run: python3 fetch-anchors.py --strict

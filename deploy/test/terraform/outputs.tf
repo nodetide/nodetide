@@ -36,3 +36,13 @@ output "dns_nameservers" {
   description = "Set these as the domain's nameservers at the registrar (only when create_dns_zone is on)."
   value       = var.dns_zone != "" && var.create_dns_zone ? hcloud_zone.managed[0].authoritative_nameservers.assigned : []
 }
+
+output "mail_address" {
+  value = local.mail ? "chains@${var.domain}" : ""
+}
+
+output "dkim_private_key" {
+  description = "The DKIM signing key (PEM). The deploy job installs it on the server; it is also in the state, which is private."
+  value       = local.mail ? tls_private_key.dkim[0].private_key_pem : ""
+  sensitive   = true
+}

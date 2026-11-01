@@ -104,17 +104,19 @@ def _domain_matches(candidate: str, from_domain: str) -> bool:
 
 def authenticated(message: Message, trusted_servers: list[str] | None = None) -> bool:
     """Did our own mail server find the From domain genuine? Reads Authentication-Results (RFC 8601) written by the
-    server that received the mail; headers from other servers (anything an outsider could have added) are ignored
-    when `trusted_servers` is given. Passes on dmarc=pass, or on spf/dkim=pass for the From domain itself."""
+    server that received the mail. Only the TOPMOST such header counts: a milter prepends its result, while anything an
+    outsider forged (even with our server's name) sits below it and mail servers do not strip it. When `trusted_servers`
+    is given, that topmost header must come from one of them. Passes on dmarc=pass, or on spf/dkim=pass for the From
+    domain itself."""
     sender = sender_address(message)
     if not sender:
         return False
     from_domain = sender.rpartition("@")[2]
-    for header in message.get_all("Authentication-Results") or []:
+    for header in (message.get_all("Authentication-Results") or [])[:1]:
         text = " ".join(str(header).split())
         server = text.split(";", 1)[0].strip().split()[0].lower() if text.split(";", 1)[0].strip() else ""
         if trusted_servers is not None and server not in {s.lower() for s in trusted_servers}:
-            continue
+            return False
         if re.search(r"\bdmarc=pass\b", text, re.I):
             return True
         for m in re.finditer(r"\bdkim=pass\b[^;]*?header\.(?:d|i)=@?([\w.-]+)", text, re.I):

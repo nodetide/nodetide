@@ -234,6 +234,21 @@ The owners replace the organization's key; nothing the old installation says is 
 
 The time is the owners' judgment: attestations carry the signer's own date, which an attacker can forge, so nothing can prove when a compromise began.
 
+## Mail for the sigchain responder
+
+Profile `mail` runs a one-mailbox mail server ([docker-mailserver](https://github.com/docker-mailserver/docker-mailserver), pinned) so the node can answer requests for sigchains by email
+(`email-distribution.md`). Address: `chains@<domain>`, host `nt-mail.<domain>`.
+
+- **Inbound:** only port 25 is published (the Hetzner firewall opens it; IMAP and submission are reachable inside the compose network only). OpenDKIM, OpenDMARC and policyd-spf check every
+  message; the node believes only the topmost `Authentication-Results` header written by `MAIL_HOST` and answers only on `dmarc=pass` (or an aligned dkim/spf pass).
+- **Outbound:** the node submits its replies on 587 (authenticated); the server signs them with DKIM and delivers directly. The server's address needs outbound port 25 (open on Hetzner here: checked).
+- **TLS:** a self-signed certificate made on first start, which the node pins (`NODETIDE_MAIL_CA_FILE`). Other mail servers use TLS opportunistically and do not mind.
+- **DNS** (Terraform, `mail_enabled`): `nt-mail` A/AAAA, `MX` for the domain, SPF `v=spf1 mx -all`, DKIM (selector `mail`; the key is made in Terraform, its private half is installed by the deploy job
+  from the state), DMARC `p=quarantine`, and the reverse DNS (PTR) of both addresses to `nt-mail.<domain>`.
+- **Settings:** `./init.sh --upgrade` adds `MAIL_DOMAIN`, `MAIL_HOST`, `MAIL_ADDRESS`, `MAIL_PASSWORD`, `MAIL_RESPONDER=1` and the `mail` profile to an existing `.env` (public domains only).
+
+Try it from your own mailbox: send a message to `chains@<domain>` with `GET info` as the body (your provider must sign with DKIM or have SPF/DMARC set up, which Gmail, Fastmail and the like do).
+
 ## SMS codes (phone claims)
 
 The verification service also verifies **phone** claims: it queues an SMS and a gateway script with a USB modem
