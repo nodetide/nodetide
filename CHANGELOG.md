@@ -3,6 +3,26 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Android) - a working, publishable Android build on the current protocol
+
+- **The build works again** (every CI run since May had failed): Gradle 9.8.2, AGP 9.5 (built-in Kotlin), Kotlin 2.4.21 with the Compose compiler plugin, compile SDK 37 (the current
+  libraries need it), **target SDK 36**, current Compose BOM 2026.09, CameraX 1.6, OkHttp 5.5, serialization 1.12, coroutines 1.11, DataStore 1.3, lazysodium 5.2. The release lint error
+  (a manifest `<service>` for a class that is not a Service) is gone.
+- **Google Play**: since 31 Aug 2026 new apps and updates must target API 36+ (checked against developer.android.com): met. CI now also builds the **Android App Bundle**
+  (`bundleRelease`, the format Play takes, uploaded as an artifact) and runs `android/tools/check_16k.py`: every 64-bit native library (libsodium, JNA, CameraX) must support 16 KB memory pages,
+  a Play requirement for apps targeting Android 15+. Still to do before a first upload: a release signing/upload key, a privacy policy URL, the Data safety and content rating forms.
+- **`android/protocol`**: a plain-JVM Kotlin module with canonical JSON (Python's `ensure_ascii`, sorted by code point), Merkle commitments and proofs, builders for every event the app creates,
+  and the full sigchain v2 verifier (control and content tracks, light chains and proofs, revocation fields, organizations with owners, social recovery). Its tests run all 19 shared vectors plus
+  a builder vector (the same seeds and timestamps must give byte-identical events, signatures included). CI runs them.
+- **The app** creates an identity with it (master key + a separate device key, genesis + add_device with real capabilities; the old code hashed the unsigned genesis with BLAKE2b, left out required
+  fields and did not escape strings, so the node could never have accepted it), speaks the node's actual response shapes, keeps chains as raw JSON, and **verifies every chain it downloads**
+  before trusting it (the identity screen says "verified" or why not).
+- **Fixed**: the web client left DEL (U+007F) unescaped in canonical JSON, Python escapes it; added to the vectors and the browser test.
+
+### Not done in the Android app
+- Claims, verification flows, sign-in approval and recovery screens (the web client has them); device pairing via the node's pairing API (the old QR attach screen is unchanged); messages and relays
+  were not reworked. The protocol module has everything these need.
+
 ## 2026-11-02 (Go and ECR) - the Go auth server speaks sigchain v2; CI runs the tests
 
 - **Go** (`golang/auth`): a port of sigchain v2 verification: the two tracks, content commitments and Merkle proofs (`merkle.go`), light chains with `AttachContent`, `checkpoint`,
