@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import re
 import secrets
@@ -302,6 +303,18 @@ def setup_oidc(
     """Create the provider, register routes and lifecycle hooks."""
     provider = OIDCProvider(config, storage, fetch=fetch)
     provider.claim_rules = {**default_claim_rules(app, config), **config.claim_rules}
+
+    def rules_with(issuer: str) -> dict[str, ClaimRule]:
+        added = dataclasses.replace(
+            config,
+            email_issuers=[*config.email_issuers, issuer],
+            phone_issuers=[*config.phone_issuers, issuer],
+            notary_issuers=[*config.notary_issuers, issuer],
+        )
+        return {**default_claim_rules(app, added), **config.claim_rules}
+
+    provider.rules_factory = rules_with
+    provider.refresh_rules()
     app["oidc"] = provider
 
     app.router.add_get("/.well-known/openid-configuration", discovery)

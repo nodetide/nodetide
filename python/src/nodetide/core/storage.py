@@ -186,6 +186,13 @@ CREATE TABLE IF NOT EXISTS owned_issuer (
     created_at INTEGER NOT NULL
 );
 
+-- The organization this owned issuer acts for, once its owners have founded it (found by itself or given)
+CREATE TABLE IF NOT EXISTS issuer_org (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    org_hash TEXT NOT NULL,
+    found_at INTEGER NOT NULL
+);
+
 -- Explorer index (derived from sigchains; safe to rebuild)
 CREATE TABLE IF NOT EXISTS explorer_identities (
     identity_hash TEXT PRIMARY KEY,
@@ -811,6 +818,20 @@ class Storage:
                 """,
                 (identity_hash, master_signing_key, master_encryption_key,
                  device_pubkey, device_signing_key, int(time.time())),
+            )
+
+    def get_issuer_org(self) -> str | None:
+        with self.transaction() as cur:
+            cur.execute("SELECT org_hash FROM issuer_org WHERE id = 1")
+            row = cur.fetchone()
+        return row["org_hash"] if row else None
+
+    def save_issuer_org(self, org_hash: str) -> None:
+        import time
+
+        with self.transaction() as cur:
+            cur.execute(
+                "INSERT OR REPLACE INTO issuer_org (id, org_hash, found_at) VALUES (1, ?, ?)", (org_hash, int(time.time()))
             )
 
     def get_owned_issuer(self) -> dict | None:

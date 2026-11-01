@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -37,7 +38,7 @@ from nodetide.verifiers.config import (
 )
 from nodetide.verifiers.eid_notary import EidNotary
 from nodetide.verifiers.email_verifier import CodeVerifier
-from nodetide.verifiers.issuer import IssuerNotReady, NodeIssuer, founding_request, load_owned
+from nodetide.verifiers.issuer import IssuerNotReady, NodeIssuer, discover_org, founding_request, load_owned
 from nodetide.verifiers.sms import SmsOutbox
 
 logger = logging.getLogger("nodetide.verifier")
@@ -159,8 +160,27 @@ def create_pending_app(body: dict, reason: str) -> web.Application:
     return app
 
 
+async def _watch_for_approval(app: web.Application) -> None:
+    """Wait for the owners: when their approval reaches the node, adopt the organization and restart into service."""
+    storage, node_url = app["storage"], app["node_url"]
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(app.get("poll_seconds", 15))
+        try:
+            found = await loop.run_in_executor(None, discover_org, storage, node_url)
+        except Exception as e:  # the node may be down for a moment
+            logger.info("looking for the organization: %s", e)
+            continue
+        if found:
+            logger.warning("the owners approved: organization %s found, restarting to issue", found)
+            storage.save_issuer_org(found)
+            storage.close()
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 def run_pending(
     storage: Storage, name: str, owners: str | None, reason: str, host: str, port: int, governance: str | None = None,
+    node_url: str | None = None,
 ) -> None:
     """The issuer is owned but not founded yet: serve the founding request (and a clear 503 for the rest) until it is."""
     try:
@@ -170,7 +190,15 @@ def run_pending(
         reason = str(e)
     logger.warning("not issuing yet: %s", reason)
     logger.warning("founding request for the owners: %s", json.dumps(body))
-    web.run_app(create_pending_app(body, reason), host=host, port=port, print=None)
+    app = create_pending_app(body, reason)
+    if node_url and "genesis" in body:
+        app["storage"], app["node_url"] = storage, node_url
+
+        async def _start(a: web.Application) -> None:
+            a["watcher"] = asyncio.create_task(_watch_for_approval(a))
+
+        app.on_startup.append(_start)
+    web.run_app(app, host=host, port=port, print=None)
 
 
 def publish_issuer(verifier: CodeVerifier | NodeIssuer, target: str | None) -> None:
@@ -202,7 +230,7 @@ def main() -> None:
         except IssuerNotReady as e:
             run_pending(
                 storage, issuer_name, os.environ.get("NODETIDE_ISSUER_OWNERS"), str(e), args.host, args.port,
-                os.environ.get("NODETIDE_ISSUER_GOVERNANCE"),
+                os.environ.get("NODETIDE_ISSUER_GOVERNANCE"), os.environ.get("NODETIDE_ISSUER_NODE"),
             )
             return
     else:

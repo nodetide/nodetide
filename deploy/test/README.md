@@ -210,14 +210,14 @@ in place; the organization, its history and the attestations it issued stay vali
 trustees) is the organization's recovery. Setting it up, once:
 
 1. In the web client (`nt-node.<domain>`) create your identity, back it up and set up recovery (the banner).
-2. Put `ISSUER_OWNED=1` and `ISSUER_OWNERS=<your identity hash>` (several: `hash:weight,hash:weight`) in `.env` on the
-   server and `docker compose up -d verifier`. The verifier makes its keys and waits; its founding request is at
-   `https://nt-verifier.<domain>/api/issuer/request` (also in `docker compose logs verifier`).
-3. In the web client, **Organizations you own**: paste the request and approve it. With several owners each approves in
-   turn and passes the result on; the last one publishes it. Copy the organization hash.
-4. Put `ISSUER_ORG=<hash>` in `.env` and `docker compose up -d verifier`, then `docker compose restart node` (the node
-   pins the issuer's hash at start). A self-run organization authorizes the verifier's signing key by itself; for a
-   managed one, authorize it with the form under the approval first.
+2. Once, on the server: `ISSUER_OWNED=1` and `ISSUER_OWNERS=<your identity hash>` (several: `hash:weight,hash:weight`) in `.env`,
+   then `docker compose up -d verifier`. That is the only operator step; the verifier makes its keys and waits.
+3. In the web client, **Wallet** tab, **Organizations you own**: the card fetches the verifier's founding request by itself.
+   Check the name and press Approve (a passkey or the unlocked wallet confirms it). With several owners each approves in turn and
+   passes the result on; the last one publishes it.
+4. Nothing else. The verifier sees the approval on the node within seconds, adopts the organization, restarts itself and starts
+   issuing (a self-run organization authorizes its own signing key; for a managed one authorize the key with the second form).
+   The node reads the verifier's published issuer from the shared file whenever it changes, so it needs no restart either.
 
 ## SMS codes (phone claims)
 

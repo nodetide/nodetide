@@ -253,7 +253,7 @@ async def test_banner_backup_recovery_and_restore():
                 assert "signature is invalid" in await approve_form(json.dumps(forged))
                 outsider = json.loads(json.dumps(founding_request(VerifierStorage.memory(), "Other", people[0].identity_hash)))
                 assert "not one of this organization" in await approve_form(json.dumps(outsider))
-                with pytest.raises(IssuerNotReady, match="ISSUER_ORG"):
+                with pytest.raises(IssuerNotReady, match="waiting for the owners"):
                     await asyncio.to_thread(load_owned, verifier_db, "Test verifier", None, base, browser_trustee)
 
                 assert await approve_form(json.dumps(founding)) is None

@@ -33,6 +33,7 @@ services:
       # sign-in with any Nodetide identity through standard OIDC
       NODETIDE_OIDC_ISSUER: ${NODE_URL}
       NODETIDE_WEB_VERIFIER_URL: ${VERIFIER_URL}   # the browser client verifies claims with this service
+      NODETIDE_OIDC_ISSUERS_FILE: /issuer/email-issuer   # the verifier publishes its issuer here; read live, no restart
       NODETIDE_AUTH_AUDIENCE: ${NODE_URL}
       NODETIDE_OIDC_CLIENTS_FILE: /config/clients.json
       NODETIDE_OIDC_KEY_FILE: /data/oidc_signing_key.pem

@@ -1834,8 +1834,26 @@
       },
 
       // Organizations owned by this identity
-      org: { password: '', request: '', result: null },
+      org: { password: '', request: '', result: null, service: '' },
       dev: { password: '', orgHash: '', request: '' },
+
+      async fetchRequest(quiet) {
+        /** Ask the verification service for the founding request, so nobody has to copy JSON around. */
+        try {
+          const base = await Wallet.verifierUrl();
+          const response = await fetch(base + '/api/issuer/request');
+          const body = await response.json();
+          if (!body.genesis) {
+            if (!quiet) Alpine.store('app').showError(body.status === 'founded' ? 'That organization is already founded.' : 'The verification service has no founding request.');
+            return;
+          }
+          if (body.status === 'founded') { if (!quiet) Alpine.store('app').showSuccess('The verification service is already set up.'); return; }
+          this.org.request = JSON.stringify(body);
+          this.org.service = body.name || 'the verification service';
+        } catch (e) {
+          if (!quiet) Alpine.store('app').showError('Could not reach the verification service: ' + e.message);
+        }
+      },
 
       async approveOrganization() {
         Alpine.store('app').loading = true;

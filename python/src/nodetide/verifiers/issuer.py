@@ -167,6 +167,30 @@ def _fetch_chain(node_url: str, identity_hash: str) -> Sigchain:
     return Sigchain.from_list(_http_json(f"{node_url.rstrip('/')}/api/identities/{identity_hash}/sigchain")["events"])
 
 
+def discover_org(storage: Storage, node_url: str) -> str | None:
+    """Has the owners' approval reached the node? Look for the organization whose genesis is the one this issuer signed.
+
+    The match is exact (every field but the approvals) and the genesis carries our own key's signature, so nobody
+    can plant a look-alike; load_owned still verifies the whole chain, owners included, before anything is used.
+    """
+    row = storage.get_owned_issuer()
+    if row is None:
+        return None
+    ours = {k: v for k, v in json.loads(row["genesis_json"]).items() if k not in ("signature", "approvals")}
+    listing = _http_json(f"{node_url.rstrip('/')}/api/identities").get("identities", [])
+    for item in listing[:500]:
+        if item.get("type") != "organization":
+            continue
+        try:
+            events = _http_json(f"{node_url.rstrip('/')}/api/identities/{item['identity_hash']}/sigchain")["events"]
+        except Exception:
+            continue
+        genesis = events[0] if events else {}
+        if {k: v for k, v in genesis.items() if k not in ("signature", "approvals")} == ours:
+            return item["identity_hash"]
+    return None
+
+
 def load_owned(
     storage: Storage, name: str, org_hash: str | None, node_url: str | None, owners_text: str | None = None,
     governance: str | None = None,
@@ -178,8 +202,14 @@ def load_owned(
     organization's own key adds it (an ordinary event, no owner needed) and the node is told.
     """
     row = _owned_row(storage, name, owners_text, governance)
+    org_hash = org_hash or storage.get_issuer_org()
+    if not org_hash and node_url:
+        try:
+            org_hash = discover_org(storage, node_url)
+        except Exception as e:
+            raise IssuerNotReady(f"cannot look for the organization on {node_url}: {e}") from e
     if not org_hash:
-        raise IssuerNotReady("NODETIDE_ISSUER_ORG is not set: the owners approve the founding request, then set it")
+        raise IssuerNotReady("waiting for the owners to approve the founding request (it is published at /api/issuer/request)")
     master = KeyPair.from_dict(json.loads(row["master_keys"]))
     device = KeyPair.from_dict(json.loads(row["device_keys"]))
     chain = storage.get_sigchain(org_hash)
@@ -232,4 +262,5 @@ def load_owned(
             except Exception as e:
                 raise IssuerNotReady(f"the node did not accept the signing key's authorization: {e}") from e
     storage.save_sigchain(chain)
+    storage.save_issuer_org(org_hash)
     return NodeIssuer(Identity(sigchain=chain, local_keypair=master), device.signing_key)

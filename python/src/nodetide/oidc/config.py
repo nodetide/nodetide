@@ -89,6 +89,7 @@ class OIDCConfig:
     allow_insecure: bool = False  # http:// issuer and redirect URIs: local testing only
     wallet_urls: list[str] = field(default_factory=list)  # web wallets offered on the sign-in page
     claim_rules: dict = field(default_factory=dict)  # explicit ClaimRule overrides by claim type
+    issuers_file: str | None = None  # file holding one issuer hash that is trusted for email, phone and eID claims; re-read when it changes
     attempt_lifetime: int = 900  # how long a sign-in page stays usable
     code_lifetime: int = 120
     id_token_lifetime: int = 600
@@ -194,4 +195,5 @@ class OIDCConfig:
             name_match=os.environ.get("NODETIDE_OIDC_NAME_MATCH", "transliterated"),
             allow_insecure=insecure,
             wallet_urls=[w.strip() for w in os.environ.get("NODETIDE_OIDC_WALLET_URLS", "").split(",") if w.strip()],
+            issuers_file=os.environ.get("NODETIDE_OIDC_ISSUERS_FILE") or None,
         )

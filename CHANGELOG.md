@@ -39,6 +39,11 @@ still open, so a new session can pick up without re-deriving context.
 - A verifier whose owned issuer is not set up yet answers every API call with `503 {error: issuer_not_ready, message}` (CORS-readable) instead of 404, and the
   browser wallet shows "The verification service is not ready yet: <reason>".
 
+- **No operator steps after the approval**: the waiting verifier looks for the organization whose genesis is the one it signed (exact match, our own key's
+  signature) and, once the owners' approval reaches the node, adopts it (`issuer_org` table), restarts itself and issues; `ISSUER_ORG` is no longer needed. The
+  node trusts the issuer in `NODETIDE_OIDC_ISSUERS_FILE` (the file the verifier publishes) and re-reads it when it changes, so it is not restarted either. The
+  approval card fetches the founding request from the verification service by itself.
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.

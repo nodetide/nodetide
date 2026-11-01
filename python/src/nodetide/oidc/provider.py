@@ -17,11 +17,14 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
+import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from nodetide.core.auth import (
@@ -73,6 +76,8 @@ MSG_EXPIRED_FETCHING = (
     "We're still fetching it in the background — try again in a few minutes."
 )
 MSG_TOO_MANY_FAILURES = "Too many rejected approvals. Please start again."
+
+logger = logging.getLogger(__name__)
 
 
 def b64url(data: bytes) -> str:
@@ -177,6 +182,8 @@ class OIDCProvider:
         self.codes: dict[str, AuthCode] = {}
         self.access_tokens: dict[str, AccessToken] = {}
         self.claim_rules: dict[str, ClaimRule] = dict(config.claim_rules)
+        self.rules_factory: Callable[[str], dict[str, ClaimRule]] | None = None  # issuer hash from the issuers file -> rules
+        self._issuers_seen: tuple[int, int] | None = None  # (mtime_ns, size) of the issuers file last applied
         self.fetcher = IdentityFetcher(
             storage,
             seed_nodes=config.seed_nodes,
@@ -335,8 +342,30 @@ class OIDCProvider:
                     wanted.append(claim_type)
         return wanted
 
+    def refresh_rules(self) -> None:
+        """Apply the issuer the verification service has published (config.issuers_file), without a restart.
+
+        The file is written by the verification service itself once its organization is founded; this node
+        trusts exactly that one hash, for the claim types the operator allows (see default_claim_rules).
+        """
+        path = self.config.issuers_file
+        if not path or self.rules_factory is None:
+            return
+        try:
+            st = os.stat(path)
+            if (st.st_mtime_ns, st.st_size) == self._issuers_seen:
+                return
+            issuer = open(path, encoding="utf-8").read().strip().lower()
+        except OSError:
+            return
+        self._issuers_seen = (st.st_mtime_ns, st.st_size)
+        if re.fullmatch(r"[0-9a-f]{64}", issuer):
+            self.claim_rules = self.rules_factory(issuer)
+            logger.info("trusting issuer %s from %s", issuer, path)
+
     def claims_requested(self, attempt: LoginAttempt) -> list[dict[str, Any]]:
         """What the user's app may present for this sign-in (rules only, no secrets)."""
+        self.refresh_rules()
         return [
             self.claim_rules[t].describe()
             for t in self.requested_claim_types(attempt.scope) if t in self.claim_rules
@@ -350,6 +379,7 @@ class OIDCProvider:
         Only claim types the application asked for (via scope) are considered; an
         unsuitable presentation never fails the sign-in, it just releases nothing.
         """
+        self.refresh_rules()
         wanted = set(self.requested_claim_types(attempt.scope))
         verified: dict[str, VerifiedClaim] = {}
         report: dict[str, Any] = {"released": [], "rejected": [], "ignored": 0}

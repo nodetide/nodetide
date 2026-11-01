@@ -1261,7 +1261,7 @@
           </p>
         </div>
       </div>
-        <div class="card" x-data="protectionUI" x-show="$store.identity.activeHash">
+        <div class="card" x-data="protectionUI" x-show="$store.identity.activeHash" x-init="fetchRequest(true)">
           <div class="card-header">
             <span class="card-title">Organizations you own</span>
           </div>
@@ -1272,7 +1272,10 @@
           </p>
           <form @submit.prevent="approveOrganization">
             <div class="form-group">
-              <label>Founding request (JSON)</label>
+              <label>Founding request (JSON)
+                <button type="button" class="btn btn-small btn-secondary" @click="fetchRequest(false)">Fetch from the verification service</button>
+              </label>
+              <p class="text-small" x-show="org.service">Found a request from <strong x-text="org.service"></strong>. Check that you started this, then approve.</p>
               <textarea x-model="org.request" rows="5" required></textarea>
             </div>
             <div class="form-group" x-show="$store.protection.needsPassword">
