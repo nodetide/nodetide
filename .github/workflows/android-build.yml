@@ -43,6 +43,10 @@ jobs:
         working-directory: android
         run: ./gradlew :protocol:test --no-daemon
 
+      - name: App unit tests (accounts)
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
       - name: Build Debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
