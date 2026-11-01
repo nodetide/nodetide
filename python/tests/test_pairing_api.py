@@ -78,3 +78,20 @@ async def test_slots_expire_and_are_capped(client):
         assert (await client.post("/api/pairing", json={"slot": f"{9:064x}", "request": REQUEST})).status == 503
     finally:
         pairing.MAX_SLOTS = old
+
+
+async def test_posting_a_known_genesis_again_never_truncates_the_chain(client):
+    """The genesis event is public; replaying it must not wipe the identity's later events."""
+    from nodetide.core.identity import DeviceCapability, Identity
+
+    identity = Identity.create(name="victim")
+    genesis = identity.sigchain.to_list()[0]
+    assert (await client.post("/api/identities", json={"event": genesis})).status == 201
+    identity.add_device("laptop", capabilities=[DeviceCapability.AUTHENTICATE])
+    event = identity.sigchain.to_list()[1]
+    assert (await client.post(f"/api/identities/{identity.identity_hash}/events", json={"event": event})).status in (200, 201)
+
+    again = await client.post("/api/identities", json={"event": genesis})
+    assert again.status == 200  # idempotent
+    chain = await (await client.get(f"/api/identities/{identity.identity_hash}/sigchain")).json()
+    assert chain["length"] == 2

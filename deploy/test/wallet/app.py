@@ -21,6 +21,7 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import time
@@ -35,7 +36,8 @@ from nacl.secret import SecretBox
 
 from nodetide.core.auth import create_assertion
 from nodetide.core.claims import Attestation, ClaimDocument, ClaimError
-from nodetide.core.crypto import EncryptionPublicKey, KeyPair
+from nodetide.core.crypto import (BACKUP_KDF_ITERATIONS, EncryptionPublicKey, KeyPair, password_decrypt, password_encrypt,
+                                  weak_password_reason)
 from nodetide.core.identity import DeviceCapability, Identity, Sigchain
 from nodetide.eidas.notary_statement import NOTARIZABLE, build_notary_statement
 
@@ -60,7 +62,7 @@ LAUNCH_TTL = 60
 START = os.environ.get("WALLET_START", "")
 PAIRING_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0 O 1 I L
 PAIRING_LENGTH = 10  # about 49 bits: the node only ever sees its hash
-PAIRING_PATHS = {"/", "/healthz", "/launch", "/api/pairing/restart", "/api/pairing/new-identity"}
+PAIRING_PATHS = {"/", "/healthz", "/launch", "/api/pairing/restart", "/api/pairing/new-identity", "/api/restore"}
 launch_tokens: dict[str, float] = {}
 sessions: set[str] = set()
 STATEMENT_DAYS = 7
@@ -530,7 +532,7 @@ def state_view() -> dict[str, Any]:
                        "rank": rank, "default": rank == 1 and len(order) > 1,
                        "value": doc.value if doc else None, "attestations": atts,
                        })
-    return {"identity": identity.identity_hash, "claims": claims}
+    return {"identity": identity.identity_hash, "claims": claims, "protection": protection()}
 
 
 async def api_state(request: web.Request) -> web.Response:
@@ -664,6 +666,185 @@ async def api_signin_approve(request: web.Request) -> web.Response:
         return web.json_response(result)
     released = ", ".join(r["claim_type"] for r in (result.get("claims") or {}).get("released", [])) or "nothing"
     raise web.HTTPSeeOther("/?msg=" + quote(f"{result.get('message', '')} Released: {released}."))
+
+
+# --- protection: backup and recovery --------------------------------------------------------------------------------
+#
+# The claim values and the keys exist only here; the node holds commitments and the chain. So an identity is only safe
+# once (1) a password-encrypted backup of everything unrecoverable has been saved somewhere else, and (2) trustees are
+# named who can restore control of the identity (social recovery, an event on the chain). Until both are done the
+# dashboard carries a banner.
+
+BACKUP_FORMAT = "nodetide-wallet-backup"
+MIN_TRUSTEES = 3
+HASH_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def backup_digest() -> str:
+    """Fingerprint of what a backup has to cover: a backup made before a claim or attestation was added is out of date."""
+    state = wallet.state
+    material = {"claims": sorted(state["claims"]),
+                "attestations": sorted([a["claim_id"], a["method"], a["expires_at"]] for a in state["attestations"]),
+                "device": wallet.device.verify_key.to_hex(), "master": bool(state.get("master"))}
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+
+
+def protection() -> dict[str, Any]:
+    identity = wallet.identity
+    backup = wallet.state.get("backup") or {}
+    return {"backup_done": backup.get("digest") == backup_digest(), "backup_at": backup.get("at"),
+            "recovery_done": identity.sigchain.get_recovery_config() is not None, "can_set_recovery": identity.is_own}
+
+
+def make_backup(password: str, confirm: str) -> dict[str, Any]:
+    """The file to save elsewhere: keys, chain, claim values and attestations, encrypted under the password."""
+    if password != confirm:
+        raise WalletError("the two passwords differ")
+    reason = weak_password_reason(password)
+    if reason:
+        raise WalletError(reason)
+    contents = {k: wallet.state[k] for k in ("master", "device", "sigchain", "claims", "attestations") if k in wallet.state}
+    plain = json.dumps(contents).encode()
+    encrypted = password_encrypt(plain, password, BACKUP_KDF_ITERATIONS)
+    if password_decrypt(encrypted, password) != plain:  # never mark a backup as saved that cannot be read back
+        raise WalletError("the backup did not verify and was not counted", 500)
+    now = int(time.time())
+    wallet.state["backup"] = {"at": now, "digest": backup_digest()}
+    wallet.save()
+    return {"format": BACKUP_FORMAT, "version": 1, "identity_hash": wallet.identity.identity_hash, "created_at": now,
+            "holds_master_key": "master" in wallet.state, "encrypted": encrypted}
+
+
+def restore_backup(raw: bytes, password: str) -> None:
+    """Into a wallet that is still empty (its pairing page): the identity, keys and claims as they were saved."""
+    if "pairing" not in wallet.state:
+        raise WalletError("a backup can only be restored into a wallet that is still empty", 409)
+    try:
+        saved = json.loads(raw)
+        if saved.get("format") != BACKUP_FORMAT:
+            raise ValueError("format")
+        contents = json.loads(password_decrypt(saved["encrypted"], password))
+        chain = Sigchain.from_list(contents["sigchain"])
+        device = KeyPair.from_dict(contents["device"])
+        documents = {cid: ClaimDocument.from_dict(d) for cid, d in contents["claims"].items()}
+        if "master" in contents:
+            KeyPair.from_dict(contents["master"])
+        attestations = list(contents["attestations"])
+    except (ValueError, KeyError, TypeError, ClaimError):
+        raise WalletError("wrong password, or this is not a backup of this kind of wallet") from None
+    ok, why = chain.verify()
+    mine = next((d for d in chain.get_active_devices() if d.pubkey == device.verify_key.to_hex()), None)
+    if not ok or mine is None or chain.identity_hash != saved.get("identity_hash"):
+        raise WalletError("the backup does not match the identity's chain", 400)
+    for claim_id, document in documents.items():
+        if claim_id != document.claim_id or not document.matches(chain.get_claim(claim_id)):
+            raise WalletError("a claim in the backup does not match the identity's chain", 400)
+    wallet.state = {k: contents[k] for k in ("master", "device") if k in contents}
+    wallet.state.update(sigchain=chain.to_list(), claims={cid: d.to_dict() for cid, d in documents.items()},
+                        attestations=attestations, statements={})
+    wallet.state["backup"] = {"at": saved.get("created_at"), "digest": backup_digest()}
+    wallet.save()
+
+
+async def configure_recovery(trustees_text: Any, threshold_text: Any) -> None:
+    """Name the identities that can restore control of this one if every key is lost (needs the master key)."""
+    if not wallet.state.get("master"):
+        raise WalletError("recovery is set up from the wallet that holds the master key", 403)
+    identity = wallet.identity
+    trustees = [t.lower() for t in re.split(r"[\s,;]+", str(trustees_text).strip()) if t]
+    if any(not HASH_RE.fullmatch(t) for t in trustees):
+        raise WalletError("trustees are identity hashes: 64 hex characters each, one per line")
+    if len(set(trustees)) != len(trustees) or identity.identity_hash in trustees:
+        raise WalletError("name each trustee once, and not this identity itself")
+    if len(trustees) < MIN_TRUSTEES:
+        raise WalletError(f"name at least {MIN_TRUSTEES} trustees: with fewer, losing one of them would end recovery")
+    try:
+        threshold = int(str(threshold_text))
+    except ValueError:
+        raise WalletError("the threshold is a number") from None
+    if not 2 <= threshold <= len(trustees):
+        raise WalletError(f"the threshold must be between 2 and {len(trustees)}: that many trustees must agree")
+    for trustee in trustees:
+        status, _ = await node("GET", f"/api/identities/{trustee}")
+        if status != 200:
+            raise WalletError(f"the node does not know the identity {trustee[:12]}...: ask the trustee to register first")
+    identity.set_recovery(trustees, threshold)
+    wallet.state["sigchain"] = identity.sigchain.to_list()
+    wallet.save()
+    await publish()
+
+
+async def api_backup(request: web.Request) -> web.Response:
+    data = await params(request)
+    saved = make_backup(str(data.get("password", "")), str(data.get("confirm", "")))
+    name = f"nodetide-wallet-backup-{saved['identity_hash'][:8]}.json"
+    return web.Response(body=json.dumps(saved, indent=2).encode(), content_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def api_restore(request: web.Request) -> web.Response:
+    form = await request.post()
+    upload = form.get("backup")
+    if not isinstance(upload, web.FileField):
+        raise WalletError("choose the backup file")
+    restore_backup(upload.file.read(4 * 1024 * 1024), str(form.get("password", "")))
+    raise web.HTTPSeeOther("/?msg=" + quote("Restored: this wallet has your identity, keys and claims again."))
+
+
+async def api_recovery(request: web.Request) -> web.Response:
+    data = await params(request)
+    await configure_recovery(data.get("trustees", ""), data.get("threshold", ""))
+    return done(request, {"ok": True}, "Recovery is set up: those trustees can restore control of your identity.")
+
+
+def protection_banner() -> str:
+    p = protection()
+    if p["backup_done"] and p["recovery_done"]:
+        return ""
+    if p["backup_done"]:
+        backup = "done"
+    elif p["backup_at"]:
+        backup = "out of date: claims or attestations changed since your last backup. Save a new one."
+    else:
+        backup = "not done. Save an encrypted backup of your keys and claims."
+    if p["recovery_done"]:
+        recovery = "done"
+    elif p["can_set_recovery"]:
+        recovery = "not done. Name trustees who can restore your identity if you lose every key."
+    else:
+        recovery = "not done. Set it up from the wallet that holds the master key."
+    mark = lambda ok: "&#10003;" if ok else "&#10007;"  # noqa: E731
+    return f"""<div class="alert"><b>Your identity is not protected yet.</b> If this device is lost, a reputation built on it
+is lost with it.<ol>
+<li>{mark(p['backup_done'])} <a href="#backup">Encrypted key backup</a>: {backup}</li>
+<li>{mark(p['recovery_done'])} <a href="#recovery">Social recovery</a>: {recovery}</li></ol>
+<span class="muted">This stays here until both are done.</span></div>"""
+
+
+def protection_section() -> str:
+    p = protection()
+    config = wallet.identity.sigchain.get_recovery_config()
+    if config:
+        listing = "".join(f"<li><code>{esc(t)}</code></li>" for t in config.primary_trustees)
+        recovery = f"<p>Set. Any {config.primary_threshold} of these identities can restore control:</p><ul>{listing}</ul>"
+    elif p["can_set_recovery"]:
+        recovery = f"""<form method="post" action="/api/recovery">
+<p>Trustees (identity hashes, one per line, at least {MIN_TRUSTEES}; they must already exist on the node):<br>
+<textarea name="trustees" rows="4" cols="70" required></textarea></p>
+<p>How many must agree to restore your identity: <input type="number" name="threshold" min="2" value="2" style="width:4rem"> <button>Set up recovery</button></p></form>"""
+    else:
+        recovery = '<p class="muted">Not set. This device does not hold the master key: set it up from the wallet that does.</p>'
+    when = (f" Last saved {time.strftime('%Y-%m-%d %H:%M', time.localtime(p['backup_at']))}"
+            f"{'' if p['backup_done'] else ' (out of date)'}.") if p["backup_at"] else ""
+    holds = "the master key, this device's key, " if wallet.state.get("master") else "this device's key, "
+    return f"""<h2>Protect your identity</h2>
+<h3 id="backup">1. Encrypted backup</h3>
+<p>A file with {holds}your claim values and attestations, encrypted with a password (PBKDF2-SHA256, {BACKUP_KDF_ITERATIONS:,}
+rounds, AES-256-GCM). Keep it and the password apart, somewhere other than this computer.{when}</p>
+<form method="post" action="/api/backup">Password (12+ characters): <input type="password" name="password" minlength="12" required autocomplete="new-password">
+Again: <input type="password" name="confirm" minlength="12" required autocomplete="new-password"> <button>Download the backup</button></form>
+<p class="muted">Reload this page after the download. A backup counts only until you add a claim or attestation.</p>
+<h3 id="recovery">2. Social recovery</h3>{recovery}"""
 
 
 # --- pairing: more devices for one identity -----------------------------------------------------------------------
@@ -850,7 +1031,10 @@ async def pairing_dashboard(request: web.Request) -> web.Response:
 {f'<p class="err">{esc(problem)}</p>' if problem else ''}
 <form method="post" action="/api/pairing/restart" style="display:inline"><button>New code</button></form>
 <form method="post" action="/api/pairing/new-identity" style="display:inline"
- onsubmit="return confirm('Start a separate, new identity instead of pairing?')"><button>Start a new identity instead</button></form>""", request))
+ onsubmit="return confirm('Start a separate, new identity instead of pairing?')"><button>Start a new identity instead</button></form>
+<h3>Or restore from a backup</h3>
+<form method="post" action="/api/restore" enctype="multipart/form-data">Backup file: <input type="file" name="backup" required>
+Password: <input type="password" name="password" required autocomplete="off"> <button>Restore</button></form>""", request))
 
 
 # --- pages ---------------------------------------------------------------------------------------------------------
@@ -860,7 +1044,9 @@ code{word-break:break-all;background:#eee;padding:0 .25rem;border-radius:.2rem}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:.3rem .5rem;text-align:left;vertical-align:top}
 form{margin:.4rem 0}input[type=text],input[type=url],input[type=email]{width:min(28rem,100%)}
 .msg{background:#e6f6ec;padding:.5rem 1rem;border-radius:.3rem}.err{background:#fde8e8;padding:.5rem 1rem;border-radius:.3rem}
-.muted{color:#666}"""
+.muted{color:#666}
+.alert{background:#fde8e8;border:2px solid #c0392b;padding:.6rem 1rem;border-radius:.4rem;margin:.8rem 0}
+.alert ol{margin:.4rem 0 .4rem 1.2rem}"""
 
 
 def layout(body: str, request: web.Request | None = None) -> str:
@@ -998,7 +1184,7 @@ async def dashboard(request: web.Request) -> web.Response:
              + "".join(rows) + "</table>") if rows else '<p class="muted">No claims yet.</p>'
     explorer = f"{NODE_URL}/explorer/#/identity/{identity}"
     eid_section = eid_form(view)
-    body = f"""<p>Test identity: <code>{esc(identity)}</code> (<a href="{esc(explorer)}">see it in the explorer</a>)</p>
+    body = f"""{protection_banner()}<p>Test identity: <code>{esc(identity)}</code> (<a href="{esc(explorer)}">see it in the explorer</a>)</p>
 <h2>Claims</h2>{table}
 <h3>Add a claim</h3>
 <form method="post" action="/api/claims/email">Email: <input type="email" name="address" required> <button>Add</button></form>
@@ -1009,6 +1195,7 @@ async def dashboard(request: web.Request) -> web.Response:
 <input type="text" name="given" placeholder="given name" required> <input type="text" name="family" placeholder="family name" required> <button>Add</button></form>
 {eid_section}
 {devices_section()}
+{protection_section()}
 <h2>Approve a sign-in</h2>
 <form method="post" action="/api/signin/preview">Sign-in address from the application:
 <input type="url" name="login_url" required placeholder="{esc(NODE_URL)}/oidc/login/..."> <button>Look at it</button></form>
@@ -1043,6 +1230,9 @@ def build_app() -> web.Application:
     app.router.add_post("/api/signin/approve", api_signin_approve)
     app.router.add_post("/api/devices/preview", api_pairing_preview)
     app.router.add_post("/api/devices/approve", api_pairing_approve)
+    app.router.add_post("/api/backup", api_backup)
+    app.router.add_post("/api/restore", api_restore)
+    app.router.add_post("/api/recovery", api_recovery)
     app.router.add_post("/api/pairing/restart", api_pairing_restart)
     app.router.add_post("/api/pairing/new-identity", api_pairing_new_identity)
 

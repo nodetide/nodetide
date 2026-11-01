@@ -91,6 +91,18 @@ async def create_identity(request: web.Request) -> web.Response:
             logger.warning(f"create_identity: sigchain verification failed: {err}")
             return error_response(ErrorCode.INVALID_SIGCHAIN, err or "Invalid sigchain", 400)
 
+        # A genesis event is public, so posting it again must never replace what the identity has become since
+        # (devices, claims, recovery): answer "already there" and leave the stored chain alone.
+        if storage.get_sigchain(identity_hash) is not None:
+            return web.json_response(
+                CreateIdentityResponse(
+                    identity_hash=identity_hash,
+                    accepted=True,
+                    event_hash=event.event_hash(),
+                ).to_dict(),
+                status=200,
+            )
+
         # Save
         storage.save_sigchain(sigchain)
 

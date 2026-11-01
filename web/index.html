@@ -238,6 +238,20 @@
     }
 
     /* Alerts */
+    .protection-banner {
+      background: rgba(255, 71, 87, 0.12);
+      border: 2px solid var(--error);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin: 0.75rem auto;
+      max-width: 1200px;
+    }
+    .protection-banner ul { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+    .protection-banner li { margin: 0.35rem 0; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .protection-banner .mark { font-weight: bold; width: 1.2em; }
+    .protection-banner .done { color: var(--success); }
+    .protection-banner .todo { color: var(--error); }
+
     .alert {
       padding: 0.75rem 1rem;
       border-radius: 0.25rem;
@@ -603,6 +617,93 @@
       Settings
     </button>
   </nav>
+
+  <!-- Protection: banner until the identity has an encrypted backup and social recovery -->
+  <div x-data="protectionUI">
+    <div class="protection-banner container" role="alert" x-show="$store.protection.show" x-cloak>
+      <strong>Your identity is not protected yet.</strong>
+      If this browser's data is lost, the identity and the reputation built on it are lost with it.
+      This stays here until both are done:
+      <ul>
+        <li>
+          <span class="mark" :class="$store.protection.backupDone ? 'done' : 'todo'" x-text="$store.protection.backupDone ? '\u2713' : '\u2717'"></span>
+          <span>Encrypted key backup</span>
+          <span class="text-small text-muted" x-show="$store.protection.backupDone"
+                x-text="'saved ' + new Date($store.protection.backupAt).toLocaleDateString()"></span>
+          <button class="btn btn-small" x-show="!$store.protection.backupDone" @click="$store.protection.openBackup()">Back up now</button>
+        </li>
+        <li>
+          <span class="mark" :class="$store.protection.recoveryDone ? 'done' : 'todo'" x-text="$store.protection.recoveryDone ? '\u2713' : '\u2717'"></span>
+          <span>Social recovery configured</span>
+          <button class="btn btn-small" x-show="!$store.protection.recoveryDone" @click="$store.protection.openRecovery()">Set up recovery</button>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Backup modal -->
+    <div class="modal-backdrop" x-show="$store.protection.showBackup" x-cloak @click.self="$store.protection.showBackup = false">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">Encrypted key backup</span>
+          <button class="modal-close" @click="$store.protection.showBackup = false">&times;</button>
+        </div>
+        <p class="text-small text-muted mb-1">
+          A file with your master key, device key and what is needed to re-create this identity, encrypted with
+          PBKDF2-SHA256 (1,000,000 rounds) and AES-256-GCM. Keep it and its password apart, away from this computer.
+        </p>
+        <form @submit.prevent="makeBackup">
+          <div class="form-group">
+            <label>This identity's password (unlocks the keys)</label>
+            <input type="password" x-model="backup.identityPassword" autocomplete="current-password" required>
+          </div>
+          <div class="form-group">
+            <label>Backup password (at least 12 characters; a few random words work well)</label>
+            <input type="password" x-model="backup.password" autocomplete="new-password" minlength="12" required>
+          </div>
+          <div class="form-group">
+            <label>Backup password again</label>
+            <input type="password" x-model="backup.confirm" autocomplete="new-password" minlength="12" required>
+          </div>
+          <button type="submit" class="btn" style="width: 100%" :disabled="$store.app.loading">
+            <span x-show="!$store.app.loading">Download the backup</span>
+            <span x-show="$store.app.loading">Encrypting...</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Recovery modal -->
+    <div class="modal-backdrop" x-show="$store.protection.showRecovery" x-cloak @click.self="$store.protection.showRecovery = false">
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">Social recovery</span>
+          <button class="modal-close" @click="$store.protection.showRecovery = false">&times;</button>
+        </div>
+        <p class="text-small text-muted mb-1">
+          Name at least three other identities (they must already exist on this node). If you ever lose every key,
+          the number you choose below can agree to restore control of this identity, with its history and reputation.
+        </p>
+        <form @submit.prevent="setRecovery">
+          <div class="form-group">
+            <label>Trustees (identity hashes, one per line)</label>
+            <textarea x-model="recovery.trustees" rows="4" required placeholder="64 hex characters per line"></textarea>
+          </div>
+          <div class="form-group">
+            <label>How many must agree (2 or more)</label>
+            <input type="number" x-model="recovery.threshold" min="2" required>
+          </div>
+          <div class="form-group">
+            <label>This identity's password (signs the change with the master key)</label>
+            <input type="password" x-model="recovery.identityPassword" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn" style="width: 100%" :disabled="$store.app.loading">
+            <span x-show="!$store.app.loading">Set up recovery</span>
+            <span x-show="$store.app.loading">Signing...</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <!-- Main content -->
   <main class="container">

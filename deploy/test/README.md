@@ -158,6 +158,19 @@ later on one device are not sent to the other (their commitments reach every dev
 Only the wallet with the master key can add devices; revoking devices and syncing values are not built yet.
 To start over, *Start a new identity instead* on the pairing page makes a separate identity.
 
+### Backup and recovery (the banner)
+
+The wallet shows a red banner on its dashboard until the identity has (1) an **encrypted backup** and (2) **social recovery**:
+
+1. **Backup.** *Protect your identity* downloads one file with the keys, claim values and attestations, encrypted with a password
+   of 12+ characters (PBKDF2-SHA256, 1,000,000 rounds, AES-256-GCM) and read back before it counts. It goes out of date when claims or
+   attestations change, and the banner returns. A new, empty wallet (the pairing page) can restore it. Keep the file and the password apart.
+2. **Recovery.** Name at least 3 trustees (identity hashes that already exist on the node) and how many must agree (2 or more); the wallet
+   that holds the master key publishes it as a `set_recovery` event. A wallet that does not hold the master key sees the state but sets it
+   up from the one that does.
+
+The web client at the node's root has the same banner, with the same rules; its backup also holds the master key.
+
 ## Grafana as a guinea pig
 
 `nt-grafana.<domain>` is stock Grafana configured with its generic OAuth provider, the way any real application

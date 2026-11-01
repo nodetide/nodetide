@@ -3,6 +3,32 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (protection) - one identity on several devices, wallet as a macOS app, and a banner until the identity is recoverable
+
+### Added
+- **Pairing** (`python/src/nodetide/api/pairing.py`, `/api/pairing`): a new wallet makes its own device keys and opens a slot on the node named by the
+  hash of a 10-character code it shows; the wallet that holds the master key authorizes it (`Identity.authorize_device`, an `add_device` event) and
+  leaves the claim values and attestations sealed to the new device's key. The new device checks the chain, its own authorization, the sender and every
+  claim commitment before using the answer. Slots live 10 minutes in memory. One-time copy, no sync yet.
+- **Wallet without the master key** (devices with `manage_claims` sign claim events), **state encrypted with a Keychain key** (`WALLET_KEY_STORE=keychain`)
+  and **`deploy/test/macos-app/`**: the wallet as a PyInstaller menu-bar app (one-time launch link instead of the HTTP password, first-run choice to pair).
+- **Protection banner, in the wallet and the web client**, until (1) an encrypted backup exists and (2) social recovery is configured. Backup:
+  PBKDF2-SHA256 with 1,000,000 rounds + AES-256-GCM (the working copy of the keys uses 100,000), password of 12+ characters that is not trivially weak,
+  read back before it is counted, includes the master key; a wallet backup goes out of date when claims or attestations change. Recovery: at least 3
+  trustees that exist on the node, threshold 2..n, published as a `set_recovery` event. Both clients can restore from the backup.
+  `crypto.py`: `BACKUP_KDF_ITERATIONS`, `weak_password_reason`, a bound on the cost read from a file.
+
+### Fixed
+- **`POST /api/identities` replaced the stored chain whenever a genesis event was posted again**, so anyone holding a (public) genesis event could erase an
+  identity's devices, claims and recovery settings on the node. Re-posting a known genesis is now an idempotent 200 that changes nothing (test added).
+  The node on the test server has it only after the next deploy.
+- The web client's old "dump" held only the device key, with an 8-character minimum and 100,000 rounds; it now opens the new backup dialog.
+
+### Open
+- Claims added later on one device do not reach the other (no sync); devices cannot be revoked from the UI; the master key stays on the first wallet.
+- The recovery event exists but the flow that *uses* it (collect trustee signatures, `social_recovery`) has no UI yet.
+- `tests/test_web_protection_browser.py` drives headless Chrome (needs Chrome and internet) and runs only with `NODETIDE_BROWSER_TESTS=1`.
+
 ## 2026-10-26 (trust anchors) - published links with pinned fingerprints instead of certificates in the repo
 
 ### Added

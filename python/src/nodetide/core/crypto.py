@@ -358,13 +358,33 @@ ENCRYPTION_V1 = {
 }
 
 
-def password_encrypt(plaintext: bytes, password: str) -> dict[str, Any]:
+# Backups leave the device and sit in a mailbox or a drive for years: derive their key much harder than the 100k
+# used for the working copy of the keys (OWASP asks for 600k+ for PBKDF2-SHA256). The iteration count travels in the
+# file, so every reader (Python, web client) honours it.
+BACKUP_KDF_ITERATIONS = 1_000_000
+MAX_KDF_ITERATIONS = 20_000_000  # refuse files that would make us burn minutes of CPU
+MIN_BACKUP_PASSWORD = 12
+_COMMON_PASSWORDS = {"password", "passwordpassword", "123456789012", "qwertyuiopas", "qwertyqwerty", "iloveyouiloveyou",
+                     "administrator", "letmeinletmein"}
+
+
+def weak_password_reason(password: str) -> str | None:
+    """Why a backup password is too weak, or None. The web client applies the same rule."""
+    if len(password) < MIN_BACKUP_PASSWORD:
+        return f"Use at least {MIN_BACKUP_PASSWORD} characters (a few random words work well)."
+    if len(set(password)) < 6 or password.isdigit() or password.lower() in _COMMON_PASSWORDS:
+        return "That password is too easy to guess; use a longer, less predictable one."
+    return None
+
+
+def password_encrypt(plaintext: bytes, password: str, iterations: int | None = None) -> dict[str, Any]:
     """Encrypt data with a password using PBKDF2 + AES-256-GCM.
 
     This format is compatible with the web client's Crypto.encryptWithPassword.
 
     Returns a dict with encryption parameters and ciphertext for explicit format.
     """
+    iterations = iterations or ENCRYPTION_V1["kdf_iterations"]
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -378,7 +398,7 @@ def password_encrypt(plaintext: bytes, password: str) -> dict[str, Any]:
         algorithm=hashes.SHA256(),
         length=32,  # 256 bits for AES-256
         salt=salt,
-        iterations=ENCRYPTION_V1["kdf_iterations"],
+        iterations=iterations,
     )
     key = kdf.derive(password.encode("utf-8"))
 
@@ -389,7 +409,7 @@ def password_encrypt(plaintext: bytes, password: str) -> dict[str, Any]:
     return {
         "v": ENCRYPTION_V1["version"],
         "kdf": ENCRYPTION_V1["kdf"],
-        "kdf_iterations": ENCRYPTION_V1["kdf_iterations"],
+        "kdf_iterations": iterations,
         "cipher": ENCRYPTION_V1["cipher"],
         "salt": salt.hex(),
         "iv": iv.hex(),
@@ -422,6 +442,8 @@ def password_decrypt(encrypted: dict[str, Any], password: str) -> bytes:
     iv = bytes.fromhex(encrypted["iv"])
     ciphertext = bytes.fromhex(encrypted["ciphertext"])
     iterations = encrypted["kdf_iterations"]
+    if not isinstance(iterations, int) or not 1 <= iterations <= MAX_KDF_ITERATIONS:
+        raise ValueError("Unsupported key derivation cost")
 
     # Derive key from password using PBKDF2
     kdf = PBKDF2HMAC(

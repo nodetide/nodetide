@@ -150,8 +150,9 @@
       cipher: 'aes-256-gcm',
     },
 
-    async encryptWithPassword(data, password) {
+    async encryptWithPassword(data, password, iterations) {
       const encoder = new TextEncoder();
+      iterations = iterations || this.ENCRYPTION_V1.kdf_iterations;
       const salt = crypto.getRandomValues(new Uint8Array(16));
       const iv = crypto.getRandomValues(new Uint8Array(12));
 
@@ -160,7 +161,7 @@
       );
 
       const key = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt, iterations: this.ENCRYPTION_V1.kdf_iterations, hash: 'SHA-256' },
+        { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
         keyMaterial,
         { name: 'AES-GCM', length: 256 },
         false,
@@ -174,7 +175,7 @@
       return {
         v: this.ENCRYPTION_V1.version,
         kdf: this.ENCRYPTION_V1.kdf,
-        kdf_iterations: this.ENCRYPTION_V1.kdf_iterations,
+        kdf_iterations: iterations,
         cipher: this.ENCRYPTION_V1.cipher,
         salt: encodeHex(salt),
         iv: encodeHex(iv),
@@ -193,6 +194,9 @@
       const iv = decodeHex(encrypted.iv);
       const ciphertext = decodeHex(encrypted.ciphertext);
       const iterations = encrypted.kdf_iterations;
+      if (!Number.isInteger(iterations) || iterations < 1 || iterations > MAX_KDF_ITERATIONS) {
+        throw new Error('Unsupported key derivation cost');
+      }
 
       const keyMaterial = await crypto.subtle.importKey(
         'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits', 'deriveKey']
@@ -355,6 +359,139 @@
       localStorage.setItem(STORAGE_KEYS.IDENTITIES, JSON.stringify(identities));
     },
 
+    async _unlockBoth(identity, password) {
+      try {
+        return {
+          master: await Crypto.decryptWithPassword(identity.encryptedMasterKeys, password),
+          device: await Crypto.decryptWithPassword(identity.encryptedKeys, password),
+        };
+      } catch {
+        throw new Error('Invalid identity password');
+      }
+    },
+
+    async createBackup(identityHash, identityPassword, backupPassword, backupConfirm) {
+      /**
+       * The file to keep elsewhere: master and device keys plus what is needed to re-create the identity,
+       * encrypted with PBKDF2-SHA256 (BACKUP_KDF_ITERATIONS) + AES-256-GCM. It is read back before it is counted.
+       */
+      const identity = this.getIdentity(identityHash);
+      if (!identity) throw new Error('Identity not found');
+      if (backupPassword !== backupConfirm) throw new Error('The two backup passwords differ');
+      const weak = weakPasswordReason(backupPassword);
+      if (weak) throw new Error(weak);
+      if (!identity.encryptedMasterKeys) throw new Error('This identity has no master key stored here');
+
+      const keys = await this._unlockBoth(identity, identityPassword);
+      const payload = {
+        name: identity.name, distribution_points: identity.distributionPoints || null, created_at: identity.createdAt,
+        master_keys: keys.master, device_keys: keys.device,
+        genesis_event: identity.genesisEvent, add_device_event: identity.addDeviceEvent,
+      };
+      const encrypted = await Crypto.encryptWithPassword(JSON.stringify(payload), backupPassword, BACKUP_KDF_ITERATIONS);
+      const back = await Crypto.decryptWithPassword(encrypted, backupPassword);
+      if (JSON.stringify(back) !== JSON.stringify(payload)) throw new Error('The backup did not verify and was not counted');
+
+      const now = Date.now();
+      ProtectionState.save(identityHash, { backupAt: now });
+      return { version: 1, format: 'nodetide-identity-backup', identity_hash: identityHash, created_at: now,
+               holds_master_key: true, encrypted };
+    },
+
+    async restoreFromBackup(file, backupPassword, localPassword) {
+      if (!file || file.format !== 'nodetide-identity-backup') throw new Error('Not a Nodetide identity backup');
+      let payload;
+      try {
+        payload = await Crypto.decryptWithPassword(file.encrypted, backupPassword);
+      } catch {
+        throw new Error('Invalid password');
+      }
+      // Trust nothing in the file until it matches itself: the identity hash is the hash of the signed genesis
+      // event, the genesis is signed by the master key we were given, and the device key is the one it authorized.
+      const genesis = payload.genesis_event;
+      if (!genesis || await sha256(canonicalize(genesis)) !== file.identity_hash) {
+        throw new Error('The backup does not match its identity');
+      }
+      const { signature, ...unsigned } = genesis;
+      const master = payload.master_keys;
+      if (genesis.pubkey !== master.signing.publicKey || !Crypto.verify(canonicalize(unsigned), signature, genesis.pubkey)) {
+        throw new Error('The backup\'s master key does not match the identity');
+      }
+      if (payload.add_device_event.device_pubkey !== payload.device_keys.signing.publicKey) {
+        throw new Error('The backup\'s device key does not match the identity');
+      }
+
+      const identity = {
+        identityHash: file.identity_hash,
+        name: payload.name || '',
+        createdAt: payload.created_at || Date.now(),
+        storageMethod: StorageMethod.PASSWORD,
+        encryptedKeys: await Crypto.encryptWithPassword(payload.device_keys, localPassword),
+        encryptedMasterKeys: await Crypto.encryptWithPassword(master, localPassword),
+        signingPubkey: payload.device_keys.signing.publicKey,
+        encryptionPubkey: payload.device_keys.encryption.publicKey,
+        masterSigningPubkey: master.signing.publicKey,
+        distributionPoints: payload.distribution_points,
+        genesisEvent: genesis,
+        addDeviceEvent: payload.add_device_event,
+      };
+      const others = this.listIdentities().filter(i => i.identityHash !== identity.identityHash);
+      localStorage.setItem(STORAGE_KEYS.IDENTITIES, JSON.stringify([...others, identity]));
+      ProtectionState.save(identity.identityHash, { backupAt: file.created_at || Date.now() });
+
+      // Make sure the node knows the identity (it normally does already)
+      try { await api.submitGenesisEvent(genesis); } catch { /* already there */ }
+      try { await api.submitEvent(identity.identityHash, payload.add_device_event); } catch { /* already there */ }
+      return identity;
+    },
+
+    async setRecovery(identityHash, identityPassword, trusteesText, thresholdText) {
+      /** Name the identities that can restore control of this one if every key is lost (signed by the master key). */
+      const identity = this.getIdentity(identityHash);
+      if (!identity) throw new Error('Identity not found');
+      const trustees = trusteesText.split(/[\s,;]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
+      if (trustees.some(t => !/^[0-9a-f]{64}$/.test(t))) {
+        throw new Error('Trustees are identity hashes: 64 hex characters each, one per line');
+      }
+      if (new Set(trustees).size !== trustees.length || trustees.includes(identityHash)) {
+        throw new Error('Name each trustee once, and not this identity itself');
+      }
+      if (trustees.length < MIN_TRUSTEES) {
+        throw new Error(`Name at least ${MIN_TRUSTEES} trustees: with fewer, losing one of them would end recovery`);
+      }
+      const threshold = Number.parseInt(thresholdText, 10);
+      if (!(threshold >= 2 && threshold <= trustees.length)) {
+        throw new Error(`The threshold must be between 2 and ${trustees.length}: that many trustees must agree`);
+      }
+      for (const trustee of trustees) {
+        try { await api.request('GET', `/identities/${trustee}`); } catch {
+          throw new Error(`The node does not know the identity ${trustee.slice(0, 12)}...: ask the trustee to register first`);
+        }
+      }
+
+      const { master } = await this._unlockBoth(identity, identityPassword);
+      const chain = await api.request('GET', `/identities/${identityHash}/sigchain`);
+      const events = chain.events || [];
+      if (!events.length) throw new Error('Cannot determine the sigchain head');
+      const event = {
+        version: 1,
+        type: 'set_recovery',
+        alg: 'ed25519',
+        hash_alg: 'sha256',
+        timestamp: Math.floor(Date.now() / 1000),
+        prev: await sha256(canonicalize(events[events.length - 1])),
+        signed_by: master.signing.publicKey,
+        primary_trustees: trustees,
+        primary_threshold: threshold,
+        backup_trustees: null,
+        backup_threshold: null,
+        backup_activates_after: null,
+      };
+      event.signature = Crypto.sign(canonicalize(event), master.signing.secretKey);
+      await api.submitEvent(identityHash, event);
+      return event;
+    },
+
     async dumpIdentity(identityHash, password) {
       /**
        * Create a portable dump of an identity with encrypted private keys.
@@ -456,6 +593,40 @@
       }
 
       return identity;
+    },
+  };
+
+  // ============================================
+  // PROTECTION: encrypted backup + social recovery
+  // ============================================
+
+  // Backups leave the browser and sit in a mailbox or a drive for years: derive their key much harder than the
+  // working copy of the keys (OWASP asks for 600k+ for PBKDF2-SHA256). Same values as Python's crypto.py.
+  const BACKUP_KDF_ITERATIONS = 1000000;
+  const MAX_KDF_ITERATIONS = 20000000;
+  const MIN_BACKUP_PASSWORD = 12;
+  const MIN_TRUSTEES = 3;
+  const COMMON_PASSWORDS = ['password', 'passwordpassword', '123456789012', 'qwertyuiopas', 'qwertyqwerty',
+    'iloveyouiloveyou', 'administrator', 'letmeinletmein'];
+
+  function weakPasswordReason(password) {
+    if ([...password].length < MIN_BACKUP_PASSWORD) {
+      return `Use at least ${MIN_BACKUP_PASSWORD} characters (a few random words work well).`;
+    }
+    if (new Set(password).size < 6 || /^\d+$/.test(password) || COMMON_PASSWORDS.includes(password.toLowerCase())) {
+      return 'That password is too easy to guess; use a longer, less predictable one.';
+    }
+    return null;
+  }
+
+  // What the browser remembers about an identity's protection (the backup file itself is never kept here).
+  const ProtectionState = {
+    key(hash) { return `nodetide_protection_${hash}`; },
+    load(hash) {
+      try { return JSON.parse(localStorage.getItem(this.key(hash))) || {}; } catch { return {}; }
+    },
+    save(hash, patch) {
+      try { localStorage.setItem(this.key(hash), JSON.stringify({ ...this.load(hash), ...patch })); } catch { /* storage unavailable */ }
     },
   };
 
@@ -678,6 +849,8 @@
         } else {
           this.activeIdentity = null;
         }
+        const protection = Alpine.store('protection');
+        if (protection) protection.refresh();
       },
 
       setActive(identityHash) {
@@ -689,6 +862,83 @@
         return SessionKeys.isUnlocked(identityHash);
       },
     });
+
+    // Protection: the banner shows until the identity has an encrypted backup AND social recovery
+    Alpine.store('protection', {
+      hash: null,
+      backupAt: null,
+      recoveryDone: false,
+      recoveryChecked: false,
+      showBackup: false,
+      showRecovery: false,
+
+      init() { this.refresh(); },
+
+      get show() { return !!this.hash && !(this.backupAt && this.recoveryDone); },
+      get backupDone() { return !!this.backupAt; },
+
+      async refresh() {
+        const hash = Alpine.store('identity').activeHash;
+        this.hash = hash;
+        if (!hash) return;
+        this.backupAt = ProtectionState.load(hash).backupAt || null;
+        this.recoveryDone = false;
+        this.recoveryChecked = false;
+        try {
+          const identity = await api.getIdentity(hash);
+          if (this.hash === hash) this.recoveryDone = !!identity.recovery;
+        } catch { /* unknown counts as not done */ }
+        if (this.hash === hash) this.recoveryChecked = true;
+      },
+
+      openBackup() { this.showBackup = true; },
+      openRecovery() { this.showRecovery = true; },
+    });
+
+    // Backup and recovery dialogs (opened from the banner)
+    Alpine.data('protectionUI', () => ({
+      backup: { identityPassword: '', password: '', confirm: '' },
+      recovery: { identityPassword: '', trustees: '', threshold: 2 },
+
+      async makeBackup() {
+        const store = Alpine.store('protection');
+        Alpine.store('app').loading = true;
+        try {
+          const file = await KeyStore.createBackup(store.hash, this.backup.identityPassword, this.backup.password, this.backup.confirm);
+          const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `nodetide-backup-${store.hash.slice(0, 8)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          this.backup = { identityPassword: '', password: '', confirm: '' };
+          store.showBackup = false;
+          store.refresh();
+          Alpine.store('app').showSuccess('Backup downloaded. Keep the file and its password apart, away from this computer.');
+        } catch (e) {
+          Alpine.store('app').showError('Backup failed: ' + e.message);
+        } finally {
+          Alpine.store('app').loading = false;
+        }
+      },
+
+      async setRecovery() {
+        const store = Alpine.store('protection');
+        Alpine.store('app').loading = true;
+        try {
+          await KeyStore.setRecovery(store.hash, this.recovery.identityPassword, this.recovery.trustees, this.recovery.threshold);
+          this.recovery = { identityPassword: '', trustees: '', threshold: 2 };
+          store.showRecovery = false;
+          await store.refresh();
+          Alpine.store('app').showSuccess('Recovery is set up: those trustees can restore control of your identity.');
+        } catch (e) {
+          Alpine.store('app').showError('Recovery setup failed: ' + e.message);
+        } finally {
+          Alpine.store('app').loading = false;
+        }
+      },
+    }));
 
     // Identity manager
     Alpine.data('identityManager', () => ({
@@ -1279,6 +1529,11 @@
       },
 
       openDumpModal() {
+        // The old dump holds only the device key; the backup holds the master key too and is encrypted much harder.
+        if (Alpine.store('identity').activeHash) {
+          Alpine.store('protection').openBackup();
+          return;
+        }
         const activeHash = Alpine.store('identity').activeHash;
         if (!activeHash) {
           Alpine.store('app').showError('No active identity');
@@ -1361,7 +1616,11 @@
           const text = await this.restoreFile.text();
           const dump = JSON.parse(text);
 
-          await KeyStore.restoreIdentity(dump, this.restorePassword, this.restoreLocalPassword);
+          if (dump.format === 'nodetide-identity-backup') {
+            await KeyStore.restoreFromBackup(dump, this.restorePassword, this.restoreLocalPassword);
+          } else {
+            await KeyStore.restoreIdentity(dump, this.restorePassword, this.restoreLocalPassword);
+          }
 
           Alpine.store('identity').reload();
           this.showRestoreModal = false;
