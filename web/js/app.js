@@ -1429,6 +1429,7 @@
       return {
         domain, name, value, size: value.length, plain: NodetideState.plainRecord(hash, points),
         zone: NodetideState.zoneFile(domain, hash, value, points),
+        nsupdate: NodetideState.nsupdateScript(domain, hash, value, points),
         hasPoint: points.some(p => NodetideState.normalizeDomain(p) === domain && /^dns:/i.test(p)),
         devices: doc.body.devices.map(d => ({ pubkey: d.k, capabilities: d.c, label: labels.get(d.k) || '' })),
         until: new Date(doc.body.exp * 1000).toLocaleString(),
@@ -2130,6 +2131,7 @@
     // Backup and recovery dialogs (opened from the banner)
     // DNS state record: generated here, signed by the master key held in the unlocked wallet
     Alpine.data('stateRecordUI', () => ({
+      format: 'zone',
       domain: '',
       days: 7,
       result: null,

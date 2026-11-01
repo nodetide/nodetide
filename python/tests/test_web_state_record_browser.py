@@ -100,6 +100,11 @@ async def test_the_identity_tab_makes_a_record_python_accepts():
                 assert f"{result['name']}. 300 IN TXT \"{result['plain']}\"" in result["zone"]
                 assert f"{apex_name('example.org')}. 300 IN TXT \"{result['plain']}\"" in result["zone"]
 
+                # the nsupdate script is what Python's builder makes for the same records
+                from nodetide.dnspublish.nsupdate import script
+                rows = [(result["name"], result["value"]), (result["name"], result["plain"]), (apex_name("example.org"), result["plain"])]
+                assert result["nsupdate"] == script(None, "example.org", 300, [], rows, replace_all=[result["name"]])
+
                 # Python verifies it: master lineage, signature, identity, and the device the web client signs in with
                 state = verify_state(decode(result["value"]), expect_identity=identity)
                 async with http.get(f"{base}/api/identities/{identity}") as r:

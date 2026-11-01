@@ -1281,14 +1281,22 @@
             <div class="mt-1">
               <div class="form-group">
                 <label>Add these TXT records to your DNS zone (the signed state is <span x-text="result.size"></span> characters)</label>
-                <textarea readonly rows="9" x-model="result.zone" style="font-family: monospace; font-size: 0.75rem; width: 100%" @focus="$event.target.select()"></textarea>
+                <div class="flex" style="gap: 0.5rem; margin-bottom: 0.4rem">
+                  <button type="button" class="btn btn-small" :class="format === 'zone' ? '' : 'btn-secondary'" @click="format = 'zone'">Zone file</button>
+                  <button type="button" class="btn btn-small" :class="format === 'nsupdate' ? '' : 'btn-secondary'" @click="format = 'nsupdate'">nsupdate script</button>
+                </div>
+                <textarea readonly rows="9" :value="format === 'nsupdate' ? result.nsupdate : result.zone" style="font-family: monospace; font-size: 0.75rem; width: 100%" @focus="$event.target.select()"></textarea>
                 <div class="flex" style="gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap">
-                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.zone, 'Zone lines copied')">Copy all</button>
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(format === 'nsupdate' ? result.nsupdate : result.zone, 'Copied')">Copy all</button>
                   <button type="button" class="btn btn-small btn-secondary" @click="copy(result.value, 'State value copied')">Copy state value only</button>
                   <button type="button" class="btn btn-small btn-secondary" @click="copy(result.plain, 'Plain value copied')">Copy plain value only</button>
                   <button type="button" class="btn btn-small btn-secondary" @click="copy(result.name, 'Name copied')">Copy name</button>
                 </div>
               </div>
+              <p class="text-small text-muted" x-show="format === 'nsupdate'">
+                Run it with <code>nsupdate -k your-tsig.key</code> (add <code>server ns1.example.org</code> as the first line if the zone's primary is not found by itself). It first clears this identity's own name, then adds the records.
+                <code>nodetide identity dns-publish</code> does this from the command line, and through DNS provider plugins too.
+              </p>
               <div class="text-small" x-show="!result.hasPoint">
                 Also add <code x-text="'dns:' + result.domain"></code> to your distribution points (Distribution Points, Edit), so others know where to look.
               </div>

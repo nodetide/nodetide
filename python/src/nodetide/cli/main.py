@@ -258,7 +258,11 @@ def identity_set_distribution(distribution: tuple[str, ...]):
 @click.option("--domain", "-d", help="The domain you publish under (default: the first dns: distribution point)")
 @click.option("--valid-days", type=int, default=7, show_default=True, help="How long verifiers may rely on the record before it must be republished")
 @click.option("--json", "as_json", is_flag=True, help="Print the record as JSON")
-def identity_dns_record(domain: str | None, valid_days: int, as_json: bool):
+@click.option("--format", "fmt", type=click.Choice(["text", "zone", "nsupdate"]), default="text", show_default=True,
+              help="text: described; zone: lines for a zone file; nsupdate: a script for `nsupdate` (see also `identity dns-publish`)")
+@click.option("--no-apex", is_flag=True, help="Do not include the optional entry at _nodetide.<domain>")
+@click.option("--ttl", type=int, default=300, show_default=True)
+def identity_dns_record(domain: str | None, valid_days: int, as_json: bool, fmt: str, no_apex: bool, ttl: int):
     """Print the DNS TXT record that publishes this identity's CURRENT state (not its chain).
 
     The record is short (master key, active devices, chain head) and signed by your master key, so DNS itself needs no
@@ -297,6 +301,15 @@ def identity_dns_record(domain: str | None, valid_days: int, as_json: bool):
         own = getattr(event, "distribution_points", None) or own
     plain = plain_record(chain.identity_hash, own)
     shows_points = "dp=" in plain
+    if fmt != "text" and not as_json:
+        from nodetide.dnspublish.nsupdate import fqdn, script, txt_rdata
+        rows = [(name, text), (name, plain)] + ([] if no_apex else [(apex_name(domain), plain)])
+        if fmt == "zone":
+            for n, v in rows:
+                click.echo(f"{fqdn(n)} {ttl} IN TXT {txt_rdata(v)}")
+        else:
+            click.echo(script(None, domain, ttl, [], rows, replace_all=[name]), nl=False)
+        return
     if as_json:
         click.echo(json.dumps({
             "name": name, "type": "TXT", "value": text, "strings": txt_strings(text),
@@ -320,6 +333,144 @@ def identity_dns_record(domain: str | None, valid_days: int, as_json: bool):
     click.echo(f'  Value: "{plain}"')
     if f"dns:{domain}" not in [p for e in chain.events for p in (getattr(e, "distribution_points", None) or [])]:
         click.echo(f"\nNote: add the distribution point so others know where to look: nodetide identity set-distribution -d dns:{domain}")
+
+
+def _publisher_options(f):
+    for option in reversed([
+        click.option("--method", type=click.Choice(["nsupdate", "acme"]), required=True, help="How to change the zone"),
+        click.option("--zone", help="The zone to update (nsupdate finds it itself if omitted)"),
+        click.option("--nsupdate-server", help="The primary name server to send the update to (required for nsupdate)"),
+        click.option("--nsupdate-port", type=int, help="Port of that server (default 53)"),
+        click.option("--nsupdate-key-file", type=click.Path(dir_okay=False), help="TSIG key file (named.conf style or .private), as for nsupdate -k"),
+        click.option("--nsupdate-key", envvar="NODETIDE_NSUPDATE_KEY", help="[algorithm:]name:secret; prefer the environment variable NODETIDE_NSUPDATE_KEY"),
+        click.option("--acme-plugin", help="acme.sh DNS plugin, like dns_cf; its credentials come from the environment, as for acme.sh (see `dns plugins`)"),
+        click.option("--acme-home", type=click.Path(file_okay=False), help="An acme.sh installation to use (default $LE_WORKING_DIR or ~/.acme.sh)"),
+        click.option("--dry-run", is_flag=True, help="Show what would change, change nothing"),
+    ]):
+        f = option(f)
+    return f
+
+
+def _make_publisher(method, zone, nsupdate_server, nsupdate_port, nsupdate_key_file, nsupdate_key, acme_plugin, acme_home):
+    from pathlib import Path
+    from nodetide.dnspublish.acme import AcmeError, AcmePublisher
+    from nodetide.dnspublish.nsupdate import Key, NsupdateError, NsupdatePublisher
+    try:
+        if method == "nsupdate":
+            key = Key(file=nsupdate_key_file) if nsupdate_key_file else (Key.parse(nsupdate_key) if nsupdate_key else None)
+            if not nsupdate_server:
+                raise click.ClickException("--nsupdate-server is required (the primary name server that accepts updates)")
+            return NsupdatePublisher(server=nsupdate_server, port=nsupdate_port, zone=zone, key=key)
+        if not acme_plugin:
+            raise click.ClickException("--acme-plugin is required (for example dns_cf; `nodetide dns plugins` lists them)")
+        return AcmePublisher(acme_plugin, Path(acme_home) if acme_home else None)
+    except (AcmeError, NsupdateError) as e:
+        raise click.ClickException(str(e))
+
+
+@identity.command("dns-publish")
+@click.option("--domain", "-d", help="The domain you publish under (default: the first dns: distribution point)")
+@click.option("--valid-days", type=int, default=7, show_default=True)
+@click.option("--no-apex", is_flag=True, help="Do not list the identity at _nodetide.<domain>")
+@click.option("--remove", is_flag=True, help="Take the records down instead")
+@click.option("--ttl", type=int, default=300, show_default=True)
+@_publisher_options
+def identity_dns_publish(domain, valid_days, no_apex, remove, ttl, method, zone, nsupdate_server, nsupdate_port, nsupdate_key_file,
+                         nsupdate_key, acme_plugin, acme_home, dry_run):
+    """Publish (or take down) this identity's DNS records in the zone itself: no copying by hand.
+
+    Only values this identity wrote are ever replaced or removed; anything else at those names stays.
+
+    Examples:
+      nodetide identity dns-publish --method nsupdate --nsupdate-server ns1.example.org --nsupdate-key-file ./tsig.key
+      CF_Token=... nodetide identity dns-publish --method acme --acme-plugin dns_cf
+      nodetide identity dns-publish --method nsupdate --nsupdate-server ns1.example.org --nsupdate-key-file ./tsig.key --remove
+    """
+    import asyncio
+    from nodetide.core.dns_source import dns_domains
+    from nodetide.core.state import StateError
+    from nodetide.dnspublish.acme import AcmeError
+    from nodetide.dnspublish.nsupdate import NsupdateError
+    from nodetide.dnspublish.publish import authoritative_lookup, plan_publish, plan_remove
+    from nodetide.dnspublish.records import build_desired
+
+    storage = get_storage()
+    ident = get_default_identity(storage)
+    if not ident or ident.local_keypair is None:
+        raise click.ClickException("No default identity with its master key on this machine.")
+    chain = ident.sigchain
+    if domain is None:
+        points: list[str] = []
+        for event in chain.events:
+            points = getattr(event, "distribution_points", None) or points
+        known = dns_domains(points)
+        if not known:
+            raise click.ClickException("No dns: distribution point. Add one (nodetide identity set-distribution -d dns:example.org) or pass --domain.")
+        domain = known[0]
+    elif not dns_domains([f"dns:{domain}"]):
+        raise click.ClickException(f"{domain!r} is not a public domain name")
+    publisher = _make_publisher(method, zone, nsupdate_server, nsupdate_port, nsupdate_key_file, nsupdate_key, acme_plugin, acme_home)
+    try:
+        desired = build_desired(chain, ident.local_keypair, domain, valid_days * 86400, apex=not no_apex)
+    except StateError as e:
+        raise click.ClickException(str(e))
+
+    async def current(name):
+        if method == "nsupdate":                       # ask the server that holds the zone, not a cache
+            return await authoritative_lookup(nsupdate_server, nsupdate_port or 53)(name)
+        from nodetide.core.dns_source import system_txt_lookup
+        return await system_txt_lookup(name)
+
+    async def run():
+        return await (plan_remove if remove else plan_publish)(desired, current)
+
+    plan = asyncio.run(run())
+    for name, value in plan.removes:
+        click.echo(f"  remove  {name}  {value[:60]}{'...' if len(value) > 60 else ''}")
+    for name, value in plan.adds:
+        click.echo(f"  add     {name}  {value[:60]}{'...' if len(value) > 60 else ''}")
+    if plan.unchanged:
+        click.echo(f"  {len(plan.unchanged)} value(s) already up to date")
+    if plan.foreign:
+        click.echo(f"  {len(plan.foreign)} value(s) of other publishers at these names are left alone")
+    if plan.empty:
+        click.echo("Nothing to change.")
+        return
+    if dry_run:
+        click.echo("(dry run: nothing was changed)")
+        return
+    try:
+        publisher.apply(plan.removes, plan.adds, ttl)
+    except (AcmeError, NsupdateError) as e:
+        raise click.ClickException(str(e))
+    click.echo("Done." if not remove else "Taken down.")
+    click.echo(f"Check it with: nodetide identity dns-lookup {domain} {chain.identity_hash}")
+
+
+@cli.group("dns")
+def dns_group():
+    """DNS helpers."""
+
+
+@dns_group.command("plugins")
+@click.option("--acme-home", type=click.Path(file_okay=False), help="An acme.sh installation (default $LE_WORKING_DIR or ~/.acme.sh)")
+@click.argument("plugin", required=False)
+def dns_plugins(acme_home, plugin):
+    """List the acme.sh DNS plugins you can publish through, or show one plugin's options (the environment variables it reads)."""
+    from pathlib import Path
+    from nodetide.dnspublish.acme import AcmeError, check_home, check_plugin, default_home, plugin_info, plugins
+    home = Path(acme_home) if acme_home else default_home()
+    try:
+        check_home(home)
+        if plugin:
+            plugin = check_plugin(plugin)
+            check_home(home, plugin)
+            click.echo(plugin_info(home, plugin) or "(the plugin gives no description)")
+        else:
+            for name in plugins(home):
+                click.echo(name)
+    except AcmeError as e:
+        raise click.ClickException(str(e))
 
 
 @identity.command("dns-lookup")

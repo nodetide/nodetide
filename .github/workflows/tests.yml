@@ -26,6 +26,27 @@ jobs:
         working-directory: python
         run: python -m pytest tests -q
 
+  dns-publish:
+    # Publishing DNS records for real: a BIND in Docker accepting TSIG-signed dynamic updates, and the real acme.sh loading a plugin.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install
+        working-directory: python
+        run: |
+          pip install -e ".[dev]"
+          sudo apt-get update -qq && sudo apt-get install -y -qq bind9-dnsutils    # nsupdate
+          git clone --quiet --depth 1 --branch 3.1.6 https://github.com/acmesh-official/acme.sh.git "$RUNNER_TEMP/acme.sh"
+      - name: Live DNS publishing tests
+        working-directory: python
+        env:
+          NODETIDE_DNS_TESTS: "1"
+          NODETIDE_ACME_SH: ${{ runner.temp }}/acme.sh/acme.sh
+        run: python -m pytest tests/test_dns_publish_live.py -q
+
   go:
     runs-on: ubuntu-latest
     steps:

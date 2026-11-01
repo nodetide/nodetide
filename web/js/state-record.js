@@ -126,6 +126,25 @@
     return `${name}. ${ttl} IN TXT ${txtStrings(text).map(s => `"${s}"`).join(' ')}`;
   }
 
+  /** A TXT value as nsupdate wants it: quoted character-strings of at most 255 bytes, backslash and quote escaped. */
+  function txtRdata(value) {
+    if (!/^[\x20-\x7e]*$/.test(value)) throw new StateError('a TXT value must be printable ASCII');
+    const chunks = [];
+    for (let i = 0; i < value.length; i += 255) chunks.push(value.slice(i, i + 255));
+    if (!chunks.length) chunks.push('');
+    return chunks.map(c => `"${c.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(' ');
+  }
+
+  /** The same records as an `nsupdate` script (python: dnspublish/nsupdate.py script()). The identity's own name is emptied first: it holds nothing but ours. */
+  function nsupdateScript(domain, identityHash, stateText, points, { ttl = 300, apex = true } = {}) {
+    const name = recordName(domain, identityHash);
+    const plain = plainRecord(identityHash, points);
+    const lines = [`zone ${domain}.`, `update delete ${name}. TXT`, `update add ${name}. ${ttl} TXT ${txtRdata(stateText)}`, `update add ${name}. ${ttl} TXT ${txtRdata(plain)}`];
+    if (apex) lines.push(`update add ${apexName(domain)}. ${ttl} TXT ${txtRdata(plain)}`);
+    lines.push('send', '');
+    return lines.join('\n');
+  }
+
   /** Everything to publish, as zone-file text: the signed state, the plain list (same name), and the optional domain-level entry. */
   function zoneFile(domain, identityHash, stateText, points, ttl = 300) {
     const name = recordName(domain, identityHash);
@@ -140,7 +159,7 @@
     ].join('\n');
   }
 
-  const api = { PREFIX, MAX_TEXT, MAX_DEVICES, StateError, normalizeDomain, recordName, apexName, plainRecord, build, encode, txtStrings, zoneLine, zoneFile };
+  const api = { PREFIX, MAX_TEXT, MAX_DEVICES, StateError, normalizeDomain, recordName, apexName, plainRecord, build, encode, txtStrings, zoneLine, zoneFile, txtRdata, nsupdateScript };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.NodetideState = api;
 })(typeof window !== 'undefined' ? window : globalThis);

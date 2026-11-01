@@ -3,6 +3,13 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (publishing DNS records: nsupdate and acme.sh plugins)
+
+- **`nodetide identity dns-publish`** puts the identity's DNS records into the zone (`dns-publish.md`): by **RFC 2136 dynamic update** (`--method nsupdate`, TSIG key from a file or `NODETIDE_NSUPDATE_KEY`, never on a command line)
+  or through the **DNS provider plugins of acme.sh** (`--method acme --acme-plugin dns_cf`; acme.sh is sourced as a library from an installation you point to, credentials from the environment, `nodetide dns plugins` lists
+  plugins and their options). Only values this identity wrote are replaced or removed; foreign entries stay; an up-to-date zone changes nothing; `--remove` and `--dry-run`. `identity dns-record` gained `--format zone|nsupdate`,
+  and the web client's Publish tab shows an nsupdate script next to the zone lines (checked against Python's builder). Tested against a real BIND with TSIG in Docker and the real acme.sh loader (a CI job); not against live DNS providers.
+
 ## 2026-11-02 (plain distribution points in DNS)
 
 - **Plain-text distribution points in TXT records** (`state-record.md`): `v=nt1; id=<hash>; dp=https://...; dp=mailto:...`, readable and hand-editable, at the same name as the signed state, and optionally at `_nodetide.<domain>` so a domain
