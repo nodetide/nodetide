@@ -1104,7 +1104,7 @@
       // (Email local parts are case-sensitive in theory and never in practice, so Alice@ and alice@ count as one.)
       const key = v => (type === 'email' ? String(v).toLowerCase() : canonicalize(v));
       const same = Object.values(s.data.claims).find(d => !d.renounced_at && d.claim_type === type && key(d.value) === key(normalized));
-      if (same) throw new Error(`This ${type === 'legal_name' ? 'name' : type} is already in your wallet; remove that claim first if you want to start again`);
+      if (same) throw new Error(`This ${type === 'legal_name' ? 'name' : type} is already in your wallet; renounce that claim first if you want to claim it anew`);
       const claimId = this.newClaimId();
       const salt = encodeHex(crypto.getRandomValues(new Uint8Array(16)));
       const commitment = await this.commitment(claimId, type, salt, normalized);
