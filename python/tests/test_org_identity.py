@@ -25,10 +25,12 @@ class World:
     def resolve(self, h):
         return self.chains.get(h)
 
-    def org(self, owners: list[tuple[Identity, int]], org_key: KeyPair | None = None):
+    def org(self, owners: list[tuple[Identity, int]], org_key: KeyPair | None = None, governance: str | None = None):
         key = org_key or KeyPair.generate()
         decl = [{"identity": o.identity_hash, "weight": w} for o, w in owners]
-        genesis = GenesisEvent.create(key, identity_type=IdentityType.ORGANIZATION, name="org", owners=decl)
+        genesis = GenesisEvent.create(
+            key, identity_type=IdentityType.ORGANIZATION, name="org", owners=decl, governance=governance
+        )
         for o, _ in owners:
             approve(genesis, o.identity_hash, o.local_keypair, o.sigchain.head_hash)
         chain = Sigchain(events=[genesis])
@@ -304,3 +306,77 @@ def test_roundtrip_serialization_keeps_approvals():
     again = Sigchain.from_list(chain.to_list())
     assert again.head_hash == chain.head_hash
     assert again.verify(w.resolve)[0]
+
+
+def governed_device(chain, device: KeyPair, *owners):
+    ev = propose_governed(
+        AddDeviceEvent, chain.head_hash, device_pubkey=device.verify_key.to_hex(),
+        device_encryption_pubkey=device.public_encryption_key.to_hex(), label="d", capabilities=["manage_claims"],
+    )
+    return sign(ev, *owners)
+
+
+def test_managed_org_devices_need_the_owners_and_not_the_org_key():
+    w = World()
+    a, b, c = w.person("a"), w.person("b"), w.person("c")
+    chain, key = w.org([(a, 45), (b, 30), (c, 25)], governance="managed")
+    assert chain.verify(w.resolve)[0]
+    dev = KeyPair.generate()
+
+    # the organization's own key may not add a device, revoke one or rotate itself
+    for forged in (
+        org_adds_device(chain, key, dev),
+        RevokeDeviceEvent.create(key, dev.verify_key.to_hex(), chain.head_hash, "x"),
+        RotateMasterEvent.create(key, KeyPair.generate(), chain.head_hash),
+    ):
+        trial = Sigchain(events=list(chain.events) + [forged])
+        ok, err = trial.verify(w.resolve)
+        assert not ok and "decided by its owners" in err, err
+
+    # owners: over half of the weight decides
+    for signers, expected in [((a,), False), ((b, c), True), ((a, c), True)]:
+        trial = Sigchain(events=list(chain.events))
+        trial.append(governed_device(trial, dev, *signers))
+        assert trial.verify(w.resolve)[0] is expected
+
+    chain.append(governed_device(chain, dev, a, b))
+    assert dev.verify_key.to_hex() in [d.pubkey for d in chain.get_active_devices()]
+    rev = propose_governed(RevokeDeviceEvent, chain.head_hash, device_pubkey=dev.verify_key.to_hex(), reason="gone")
+    chain.append(sign(rev, a, c))
+    assert chain.verify(w.resolve)[0]
+    assert dev.verify_key.to_hex() not in [d.pubkey for d in chain.get_active_devices()]
+
+
+def test_managed_org_still_keeps_claims_with_its_own_key():
+    from nodetide.core.claims import ClaimDocument
+    from nodetide.core.identity import AddClaimEvent
+
+    w = World()
+    me = w.person()
+    chain, key = w.org([(me, 100)], governance="managed")
+    doc = ClaimDocument.create(chain.identity_hash, "email", "ops@example.org")
+    chain.append(AddClaimEvent.create(key, chain.head_hash, doc.claim_id, doc.claim_type, doc.commitment))
+    assert chain.verify(w.resolve)[0]
+
+
+def test_governance_value_and_where_it_may_appear():
+    w = World()
+    me = w.person()
+    chain, _ = w.org([(me, 100)], governance="sideways")
+    ok, err = chain.verify(w.resolve)
+    assert not ok and "governance" in err
+    plain = GenesisEvent.create(KeyPair.generate(), governance="self")
+    ok, err = Sigchain(events=[plain]).verify(w.resolve)
+    assert not ok and "without owners" in err
+
+
+def test_self_mode_is_the_default_and_leaves_old_hashes_alone():
+    w = World()
+    me = w.person()
+    chain, _ = w.org([(me, 100)])
+    assert "governance" not in chain.genesis.to_dict()
+    chain2, _ = w.org([(me, 100)], governance="self")
+    assert chain2.genesis.to_dict()["governance"] == "self" and chain2.verify(w.resolve)[0]
+    dev = KeyPair.generate()
+    chain2.append(governed_device(chain2, dev, me))  # still the owners' business only in managed mode
+    assert not chain2.verify(w.resolve)[0]

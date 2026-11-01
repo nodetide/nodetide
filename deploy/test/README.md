@@ -194,6 +194,13 @@ shared file and the node's entrypoint pins it as `NODETIDE_OIDC_EMAIL_ISSUERS`, 
 
 ### Owned issuer (an organization with owners)
 
+An organization with owners comes in two kinds, chosen when it is founded and fixed for its life
+(`ISSUER_GOVERNANCE`): **self** (the default) runs itself with its own key, so its owners are not involved in its
+activity, which is what an automated service like this verifier wants; **managed** also leaves every device change to
+the owners (the web client has a form to authorize the verifier's signing key). Either way the owners alone replace
+the organization's key if it is lost, and change the owners.
+
+
 With `ISSUER_OWNED=1` in `.env` the issuing identity is an **organization with owners**: identities, each with a weight,
 that found it and are the only ones who can recover its key or change the owners (approval of more than half of the
 declared weight). Day to day the organization runs itself: its own key, held by the verifier container, authorizes the
@@ -208,7 +215,8 @@ trustees) is the organization's recovery. Setting it up, once:
 3. In the web client, **Organizations you own**: paste the request and approve it. With several owners each approves in
    turn and passes the result on; the last one publishes it. Copy the organization hash.
 4. Put `ISSUER_ORG=<hash>` in `.env` and `docker compose up -d verifier`, then `docker compose restart node` (the node
-   pins the issuer's hash at start). The verifier has the organization authorize its signing key by itself.
+   pins the issuer's hash at start). A self-run organization authorizes the verifier's signing key by itself; for a
+   managed one, authorize it with the form under the approval first.
 
 ## SMS codes (phone claims)
 

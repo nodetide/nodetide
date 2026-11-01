@@ -114,13 +114,19 @@ def parse_owners(text: str | None) -> list[dict[str, Any]]:
     return owners
 
 
-def _owned_row(storage: Storage, name: str, owners_text: str | None) -> dict[str, Any]:
+def _owned_row(
+    storage: Storage, name: str, owners_text: str | None, governance: str | None = None
+) -> dict[str, Any]:
     """The keys and the (not yet approved) genesis of this issuer, made once and kept."""
     row = storage.get_owned_issuer()
     if row is None:
         owners = parse_owners(owners_text)
+        if governance not in (None, "", "self", "managed"):
+            raise IssuerNotReady("NODETIDE_ISSUER_GOVERNANCE is self or managed")
         master, device = KeyPair.generate(), KeyPair.generate()
-        genesis = GenesisEvent.create(master, identity_type=IdentityType.ORGANIZATION, name=name, owners=owners)
+        genesis = GenesisEvent.create(
+            master, identity_type=IdentityType.ORGANIZATION, name=name, owners=owners, governance=governance or None
+        )
         storage.save_owned_issuer(
             json.dumps(master.to_dict()), json.dumps(device.to_dict()), json.dumps(genesis.to_dict())
         )
@@ -129,11 +135,25 @@ def _owned_row(storage: Storage, name: str, owners_text: str | None) -> dict[str
     return row
 
 
-def founding_request(storage: Storage, name: str, owners_text: str | None) -> dict[str, Any]:
-    """What the owners approve to found the organization: the genesis, signed by the organization's own key."""
-    row = _owned_row(storage, name, owners_text)
+def founding_request(
+    storage: Storage, name: str, owners_text: str | None, governance: str | None = None
+) -> dict[str, Any]:
+    """What the owners approve to found the organization: the genesis, signed by the organization's own key.
+
+    Also the signing device's public data: in a "managed" organization the owners authorize that key themselves.
+    """
+    row = _owned_row(storage, name, owners_text, governance)
     genesis = json.loads(row["genesis_json"])
-    return {"name": name, "genesis": genesis, "owners": genesis["owners"]}
+    device = KeyPair.from_dict(json.loads(row["device_keys"]))
+    return {
+        "name": name, "genesis": genesis, "owners": genesis["owners"], "governance": genesis.get("governance", "self"),
+        "device": {
+            "device_pubkey": device.verify_key.to_hex(),
+            "device_encryption_pubkey": device.public_encryption_key.to_hex(),
+            "label": "attestation signer",
+            "capabilities": ISSUER_CAPABILITIES,
+        },
+    }
 
 
 def _http_json(url: str, body: dict[str, Any] | None = None) -> Any:
@@ -148,7 +168,8 @@ def _fetch_chain(node_url: str, identity_hash: str) -> Sigchain:
 
 
 def load_owned(
-    storage: Storage, name: str, org_hash: str | None, node_url: str | None, owners_text: str | None = None
+    storage: Storage, name: str, org_hash: str | None, node_url: str | None, owners_text: str | None = None,
+    governance: str | None = None,
 ) -> NodeIssuer:
     """The issuer for the organization its owners founded. Raises IssuerNotReady until that is the case.
 
@@ -156,7 +177,7 @@ def load_owned(
     passes is kept in storage so the verifier can serve it. If the chain does not yet list our signing device, the
     organization's own key adds it (an ordinary event, no owner needed) and the node is told.
     """
-    row = _owned_row(storage, name, owners_text)
+    row = _owned_row(storage, name, owners_text, governance)
     if not org_hash:
         raise IssuerNotReady("NODETIDE_ISSUER_ORG is not set: the owners approve the founding request, then set it")
     master = KeyPair.from_dict(json.loads(row["master_keys"]))
@@ -193,6 +214,11 @@ def load_owned(
     device_pub = device.verify_key.to_hex()
     if not any(d.pubkey == device_pub and DeviceCapability.SIGN_IDENTITY.value in d.capabilities
                for d in chain.get_active_devices()):
+        if chain.genesis is not None and chain.genesis.governance == "managed":
+            raise IssuerNotReady(
+                "this organization is managed: its owners have to authorize the signing key "
+                "(the device data is in the founding request)"
+            )
         event = AddDeviceEvent.create(
             master, device, "attestation signer", chain.head_hash, [DeviceCapability.SIGN_IDENTITY]
         )

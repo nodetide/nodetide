@@ -72,6 +72,9 @@ services:
       # recover it); it runs itself with its own key held here (see README "Owned issuer"). Empty = the old behaviour.
       NODETIDE_ISSUER_OWNED: ${ISSUER_OWNED:-}
       NODETIDE_ISSUER_OWNERS: ${ISSUER_OWNERS:-}
+      # self (default): the organization's own key handles devices, owners are not involved in its activity.
+      # managed: the owners also approve every device change.
+      NODETIDE_ISSUER_GOVERNANCE: ${ISSUER_GOVERNANCE:-}
       NODETIDE_ISSUER_ORG: ${ISSUER_ORG:-}
       NODETIDE_ISSUER_NODE: ${NODE_URL}
       # mail goes to the catch-all mailbox below unless SMTP_HOST is set in .env (then to the real recipient)

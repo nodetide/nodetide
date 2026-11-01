@@ -115,10 +115,12 @@ async def issuer_request(request: web.Request) -> web.Response:
     return web.json_response(request.app["issuer_request"])
 
 
-def run_pending(storage: Storage, name: str, owners: str | None, reason: str, host: str, port: int) -> None:
+def run_pending(
+    storage: Storage, name: str, owners: str | None, reason: str, host: str, port: int, governance: str | None = None,
+) -> None:
     """The issuer is owned but not founded yet: serve the founding request (and only that) until it is, then restart."""
     try:
-        body = founding_request(storage, name, owners)
+        body = founding_request(storage, name, owners, governance)
     except IssuerNotReady as e:
         body = {"name": name}
         reason = str(e)
@@ -156,10 +158,13 @@ def main() -> None:
         try:
             issuer = load_owned(
                 storage, issuer_name, os.environ.get("NODETIDE_ISSUER_ORG"), os.environ.get("NODETIDE_ISSUER_NODE"),
-                os.environ.get("NODETIDE_ISSUER_OWNERS"),
+                os.environ.get("NODETIDE_ISSUER_OWNERS"), os.environ.get("NODETIDE_ISSUER_GOVERNANCE"),
             )
         except IssuerNotReady as e:
-            run_pending(storage, issuer_name, os.environ.get("NODETIDE_ISSUER_OWNERS"), str(e), args.host, args.port)
+            run_pending(
+                storage, issuer_name, os.environ.get("NODETIDE_ISSUER_OWNERS"), str(e), args.host, args.port,
+                os.environ.get("NODETIDE_ISSUER_GOVERNANCE"),
+            )
             return
     else:
         issuer = NodeIssuer.load_or_create(storage, issuer_name)

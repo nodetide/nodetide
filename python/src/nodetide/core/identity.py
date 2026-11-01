@@ -145,6 +145,7 @@ class GenesisEvent(SigchainEvent):
     ownership_proof: str | None = None  # for ephemeral, link to persistent identity
     distribution_points: list[str] | None = None  # initial distribution endpoints
     owners: list[dict[str, Any]] | None = None  # organization identities: [{"identity", "weight"}], see below
+    governance: str | None = None  # with owners: "self" (default) or "managed", see below; fixed for the identity's life
 
     def __post_init__(self):
         self.type = EventType.GENESIS
@@ -163,6 +164,8 @@ class GenesisEvent(SigchainEvent):
         })
         if self.owners is not None:
             d["owners"] = self.owners
+        if self.governance is not None:
+            d["governance"] = self.governance
         return d
 
     @classmethod
@@ -184,6 +187,7 @@ class GenesisEvent(SigchainEvent):
             ownership_proof=data.get("ownership_proof"),
             distribution_points=data.get("distribution_points"),
             owners=data.get("owners"),
+            governance=data.get("governance"),
         )
 
     @classmethod
@@ -196,6 +200,7 @@ class GenesisEvent(SigchainEvent):
         ownership_proof: str | None = None,
         distribution_points: list[str] | None = None,
         owners: list[dict[str, Any]] | None = None,
+        governance: str | None = None,
     ) -> GenesisEvent:
         """Create and sign a new genesis event."""
         event = cls(
@@ -212,6 +217,7 @@ class GenesisEvent(SigchainEvent):
             ownership_proof=ownership_proof,
             distribution_points=distribution_points,
             owners=owners,
+            governance=governance,
         )
         # Sign the event
         signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
@@ -884,13 +890,20 @@ class DeviceInfo:
 # --- Organization identities -------------------------------------------------------------------------------------
 #
 # An organization identity is owned by other (personal) identities, each with a weight. The genesis declares the owners
-# and carries the approval of every one of them; the organization's own key signs it like any genesis. The organization
-# runs itself with that key: devices, claims and distribution points are ordinary events signed by it, and it may
-# rotate itself. Only two things need the owners: recovering the organization's key when it is lost or taken
-# (rotate_master) and changing the owners (set_owners). Those are "governed" events: they carry signed_by == GOVERNED
-# and no signature of their own, only owner approvals (a rotate_master signed by the old key is an ordinary rotation).
-# A governed event is valid when the approving owners' weights add up to MORE than half of all declared weights.
-# The owners and weights in force are those declared before the event, so a change cannot vote itself in.
+# and carries the approval of every one of them; the organization's own key signs it like any genesis. Two modes,
+# chosen in the genesis and fixed for the organization's life (`governance`):
+#
+#   "self" (default)  the organization runs itself with its own key: devices, claims and distribution points are
+#                     ordinary events signed by it, and it may rotate itself. Owners are needed only to recover the
+#                     key when it is lost or taken (rotate_master) and to change the owners (set_owners). Right for
+#                     automated organizations (a verification service) whose activity should not involve owner keys.
+#   "managed"         the owners also decide every change of devices: add_device and revoke_device need their approval
+#                     and the organization's own key cannot make them (nor rotate itself). Right where the owners
+#                     want control of who acts for the organization.
+#
+# Events the owners decide are "governed": signed_by == GOVERNED, no signature of their own, only owner approvals,
+# valid when the approving owners' weights add up to MORE than half of all declared weights. The owners and weights in
+# force are those declared before the event, so a change cannot vote itself in.
 #
 # An approval names the owner's identity and the head of the owner's chain at signing time ("state"). It is checked
 # against the owner's master key AS OF that state, so an owner who later rotates or recovers their key does not
@@ -901,7 +914,9 @@ class DeviceInfo:
 GOVERNED = "owners"
 MAX_OWNERS = 16
 MAX_OWNER_WEIGHT = 1_000_000
-GOVERNED_TYPES = (EventType.ROTATE_MASTER, EventType.SET_OWNERS)
+GOVERNED_TYPES = (EventType.ROTATE_MASTER, EventType.SET_OWNERS)  # in every mode
+MANAGED_TYPES = GOVERNED_TYPES + (EventType.ADD_DEVICE, EventType.REVOKE_DEVICE)  # "managed": devices too
+GOVERNANCE_MODES = ("self", "managed")
 
 ChainResolver = Callable[[str], "Sigchain | None"]
 
@@ -1335,6 +1350,8 @@ class Sigchain:
         if owners is not None:
             if genesis.identity_type != IdentityType.ORGANIZATION:
                 return False, "Only an organization identity has owners"
+            if genesis.governance not in (None, *GOVERNANCE_MODES):
+                return False, "Genesis: governance is self or managed"
             err = check_owner_list(owners, resolve)
             if err:
                 return False, f"Genesis: {err}"
@@ -1346,6 +1363,11 @@ class Sigchain:
                 return False, "Genesis: every founding owner must approve"
         elif genesis.approvals:
             return False, "Genesis: approvals without owners"
+        elif genesis.governance is not None:
+            return False, "Genesis: governance without owners"
+
+        managed = genesis.governance == "managed"
+        governed_types = MANAGED_TYPES if managed else GOVERNED_TYPES
 
         # Track current master key
         current_master = genesis.pubkey
@@ -1367,7 +1389,7 @@ class Sigchain:
                 # Decided by the owners of an organization, not signed by a key of the chain
                 if owners is None:
                     return False, f"Event {i}: only an organization is governed by owners"
-                if event.type not in GOVERNED_TYPES:
+                if event.type not in governed_types:
                     return False, f"Event {i}: {event.type.value} cannot be decided by owners"
                 if event.signature:
                     return False, f"Event {i}: a governed event has no signature of its own"
@@ -1376,7 +1398,11 @@ class Sigchain:
                     return False, f"Event {i}: {err}"
                 if 2 * approved <= total:
                     return False, f"Event {i}: owners approve {approved} of {total}, which is not over half"
-                if isinstance(event, RotateMasterEvent):
+                if isinstance(event, AddDeviceEvent):
+                    devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
+                elif isinstance(event, RevokeDeviceEvent):
+                    revoked.add(event.device_pubkey)
+                elif isinstance(event, RotateMasterEvent):
                     current_master = event.new_pubkey
                 elif isinstance(event, SetOwnersEvent):
                     err = check_owner_list(event.owners, resolve)
@@ -1388,8 +1414,9 @@ class Sigchain:
 
             if event.approvals:
                 return False, f"Event {i}: approvals belong on governed events only"
-            if owners is not None and event.type in (
-                EventType.SET_OWNERS, EventType.SET_RECOVERY, EventType.SOCIAL_RECOVERY
+            if owners is not None and (
+                event.type in (EventType.SET_OWNERS, EventType.SET_RECOVERY, EventType.SOCIAL_RECOVERY)
+                or (managed and event.type in MANAGED_TYPES)
             ):
                 return False, f"Event {i}: an organization's {event.type.value} is decided by its owners"
             if isinstance(event, SetOwnersEvent):

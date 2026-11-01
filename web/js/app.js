@@ -538,6 +538,34 @@
       return { complete: true, orgHash, genesis, name: genesis.name, owners: genesis.owners };
     },
 
+    async authorizeDevice(ownerHash, ownerPassword, orgHash, requestText) {
+      /** In a "managed" organization the owners authorize its devices: approve an add_device for the verifier's signing key. */
+      const owner = this.getIdentity(ownerHash);
+      if (!owner || !owner.encryptedMasterKeys) throw new Error('This browser does not hold the owner identity\'s master key');
+      if (!/^[0-9a-f]{64}$/.test(orgHash || '')) throw new Error('An organization hash is 64 hex characters');
+      let request;
+      try { request = JSON.parse(requestText); } catch { throw new Error('Paste the JSON the verifier shows at /api/issuer/request'); }
+      const device = request.device || request;
+      for (const f of ['device_pubkey', 'device_encryption_pubkey']) {
+        if (!/^[0-9a-f]{64}$/.test(device[f] || '')) throw new Error(`The request has no valid ${f}`);
+      }
+      const info = await api.getIdentity(orgHash);
+      const genesis = (info.sigchain || [])[0];
+      if (!genesis || !(genesis.owners || []).some(o => o.identity === ownerHash)) throw new Error('The active identity is not an owner of that organization');
+      if (genesis.governance !== 'managed') throw new Error('That organization manages its own devices: its own key authorizes them');
+      const { master } = await this._unlockBoth(owner, ownerPassword);
+      const events = info.sigchain;
+      const event = {
+        version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: await sha256(canonicalize(events[events.length - 1])), signed_by: 'owners', signature: '',
+        device_pubkey: device.device_pubkey, device_encryption_pubkey: device.device_encryption_pubkey,
+        label: device.label || 'attestation signer', capabilities: device.capabilities || ['sign_identity'], expires: null,
+      };
+      event.approvals = [await this._ownerApproval(owner, master, event)];
+      await api.submitEvent(orgHash, event);
+      return { authorized: true };
+    },
+
     // --- Social recovery -------------------------------------------------------------------------------------
     // Messages and records match python/src/nodetide/core/identity.py (recovery_message / sign_recovery).
 
@@ -1152,6 +1180,7 @@
 
       // Organizations owned by this identity
       org: { password: '', request: '', result: null },
+      dev: { password: '', orgHash: '', request: '' },
 
       async approveOrganization() {
         Alpine.store('app').loading = true;
@@ -1161,6 +1190,19 @@
           this.org.password = '';
           Alpine.store('app').showSuccess(this.org.result.complete
             ? 'The organization is founded.' : 'Approved. Pass the result on to the next owner.');
+        } catch (e) {
+          Alpine.store('app').showError('Could not do that: ' + e.message);
+        } finally {
+          Alpine.store('app').loading = false;
+        }
+      },
+
+      async authorizeDevice() {
+        Alpine.store('app').loading = true;
+        try {
+          await KeyStore.authorizeDevice(Alpine.store('identity').activeHash, this.dev.password, this.dev.orgHash.trim().toLowerCase(), this.dev.request);
+          this.dev.password = '';
+          Alpine.store('app').showSuccess('The organization lists the verifier\'s signing key.');
         } catch (e) {
           Alpine.store('app').showError('Could not do that: ' + e.message);
         } finally {

@@ -34,6 +34,11 @@ still open, so a new session can pick up without re-deriving context.
   fetcher (which also fetches missing owner chains) and the explorer now pass the node's storage as resolver. The issuer info carries `owner_sigchains`.
 - Test stack: `ISSUER_OWNED`, `ISSUER_OWNERS`, `ISSUER_ORG` in `.env` (README "Owned issuer"); default stays the old self-made issuer.
 
+- **Two kinds of owned organization**, chosen in the genesis (`governance`, fixed for life): `self` (default; the org's own key handles devices, owners only
+  recover the key and change owners; for automated services such as the verifier, so no owner key is involved in their activity) and `managed` (owners also
+  approve `add_device`/`revoke_device`; the org key cannot make them or rotate itself). `ISSUER_GOVERNANCE` picks it for the verifier; the web client can
+  authorize a verifier's signing key for a managed organization.
+
 ### Open
 - Backup trustees and the test wallet app (`deploy/test/wallet`) have no recovery UI yet; recovery restores control of the identity, not claim values.
 - Other `verify()` callers (claims, auth, explorer, OIDC, relay, daemon, email verifier) do not pass a resolver yet, so an owned organization fails there

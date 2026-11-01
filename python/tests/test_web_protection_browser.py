@@ -268,6 +268,25 @@ async def test_banner_backup_recovery_and_restore():
                 async with http.get(f"{base}/api/identities/{org_hash}") as r:
                     org_info = await r.json()
                 assert org_info["verified"] is True and len(org_info["devices"]) == 2
+
+                # --- a managed organization: here the owners authorize the verifier's signing key ----------------------
+                managed_db = VerifierStorage.memory()
+                managed = founding_request(managed_db, "Managed verifier", browser_trustee, "managed")
+                assert managed["governance"] == "managed"
+                assert await approve_form(json.dumps(managed)) is None
+                managed_hash = await page.js(f"{lost}.org.result.orgHash")
+                with pytest.raises(IssuerNotReady, match="managed"):
+                    await asyncio.to_thread(load_owned, managed_db, "Managed verifier", managed_hash, base, browser_trustee, "managed")
+
+                def device_form(org, request, password="trustee-pass-12"):
+                    form = {"password": password, "orgHash": org, "request": request}
+                    return attempt(f"const c={lost}; c.dev={json.dumps(form)}; await c.authorizeDevice();")
+
+                assert "manages its own devices" in await device_form(org_hash, json.dumps(managed))
+                assert "not an owner" in await device_form(friend.identity_hash, json.dumps(managed))
+                assert await device_form(managed_hash, json.dumps(managed)) is None
+                issuer = await asyncio.to_thread(load_owned, managed_db, "Managed verifier", managed_hash, base, browser_trustee, "managed")
+                assert issuer.identity_hash == managed_hash
     finally:
         if chrome:
             chrome.terminate()
