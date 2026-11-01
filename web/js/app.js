@@ -1427,7 +1427,8 @@
       const points = SigchainUtils.getLatestField(chain.events, 'distribution_points', []);
       const labels = new Map((info.devices || []).map(d => [d.pubkey, d.label]));
       return {
-        domain, name, value, size: value.length, zone: NodetideState.zoneLine(name, value),
+        domain, name, value, size: value.length, plain: NodetideState.plainRecord(hash, points),
+        zone: NodetideState.zoneFile(domain, hash, value, points),
         hasPoint: points.some(p => NodetideState.normalizeDomain(p) === domain && /^dns:/i.test(p)),
         devices: doc.body.devices.map(d => ({ pubkey: d.k, capabilities: d.c, label: labels.get(d.k) || '' })),
         until: new Date(doc.body.exp * 1000).toLocaleString(),

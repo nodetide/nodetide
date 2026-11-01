@@ -3,6 +3,13 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (plain distribution points in DNS)
+
+- **Plain-text distribution points in TXT records** (`state-record.md`): `v=nt1; id=<hash>; dp=https://...; dp=mailto:...`, readable and hand-editable, at the same name as the signed state, and optionally at `_nodetide.<domain>` so a domain
+  can list the identities it hosts. Unsigned (they are only places to look; what is fetched is verified). The node's identity fetcher uses them as extra sources for an identity whose chain names a `dns:` domain (http points
+  through the usual public-host checks, mailboxes for the email fallback). The web client's Publish tab and `nodetide identity dns-record` print all three records, and `nodetide identity dns-lookup <domain> [hash]` shows what DNS says.
+  The browser's output is checked against Python's writer and reader in the browser tests.
+
 ## 2026-11-02 (My Identity in sub-tabs)
 
 - **My Identity is split into six sub-tabs**: Overview (info, share QR), Claims, Devices & recovery, Publish (distribution points, DNS state record), Organizations (with a dot when a verification service waits for approval),

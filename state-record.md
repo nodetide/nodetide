@@ -33,6 +33,19 @@ full hash is inside the record and checked). Whoever controls the domain publish
 * *Cover every identity.* Organizations (owner-governed rotation) and identities that used social recovery or fork resolution would need other chains to verify, so a state cannot be made for them
   (`StateError`: use the chain). More than 12 devices or 8 master rotations: the same.
 
+## Plain-text distribution points
+
+Next to the signed state, the same name carries a **readable list of places to look**, in the style of SPF and DMARC:
+
+    <id32>._nodetide.example.org.  TXT  "v=nt1; id=<identity hash>; dp=https://node.example.org; dp=mailto:chains@node.example.org"
+
+Readable with `dig`, easy to write or fix by hand. It lists the identity's distribution points that can be written as one token (no spaces or `;`, printable ASCII; `dns:` points are left out, being the way here), up to 8.
+A domain can also list the identities it hosts at `_nodetide.example.org` (the same record, one TXT value per identity), so someone who knows only the domain can find them: `nodetide identity dns-lookup example.org`.
+
+**Unsigned on purpose.** It is only a list of places; whatever is fetched from them is verified like anything else, so a forged or stale record can at worst point to somewhere with nothing (or that learns who asks). A reader keeps only
+`http(s)://` and plain `mailto:` entries. The node's identity fetcher adds them to its sources for an identity that names a `dns:` domain: http points go through the usual checks (public hosts only), mailboxes join the email fallback.
+No lookup happens for hints that arrive with a sign-in page, only for domains in the identity's own signed chain.
+
 ## Use
 
 * **Publish:** in the web client, **My Identity > Publish > DNS state record** (unlock the wallet, enter the domain, choose how long it is valid): it shows the zone-file line, copy buttons, and the list of devices

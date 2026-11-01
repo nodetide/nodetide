@@ -35,6 +35,20 @@
     return `${identityHash.slice(0, LABEL_PREFIX)}._nodetide.${domain}`;
   }
 
+  function apexName(domain) {
+    return `_nodetide.${domain}`;
+  }
+
+  const PLAIN_SAFE = /^[\x21-\x7e]{1,200}$/;
+
+  /** The readable list of places to look: `v=nt1; id=<hash>; dp=<point>; ...` (same rules as core/dns_source.py plain_record). */
+  function plainRecord(identityHash, points) {
+    const chosen = [...new Set(points)].filter(p => typeof p === 'string' && PLAIN_SAFE.test(p) && !p.includes(';') && !/^dns:/i.test(p)).slice(0, 8);
+    const text = ['v=nt1', `id=${identityHash}`, ...chosen.map(p => `dp=${p}`)].join('; ');
+    if (text.length > 1000) throw new StateError('the plain record would be too long');
+    return text;
+  }
+
   /**
    * @param {object} a
    * @param {string} a.identityHash
@@ -112,7 +126,21 @@
     return `${name}. ${ttl} IN TXT ${txtStrings(text).map(s => `"${s}"`).join(' ')}`;
   }
 
-  const api = { PREFIX, MAX_TEXT, MAX_DEVICES, StateError, normalizeDomain, recordName, build, encode, txtStrings, zoneLine };
+  /** Everything to publish, as zone-file text: the signed state, the plain list (same name), and the optional domain-level entry. */
+  function zoneFile(domain, identityHash, stateText, points, ttl = 300) {
+    const name = recordName(domain, identityHash);
+    const plain = plainRecord(identityHash, points);
+    return [
+      '; signed state: who may act for you now',
+      zoneLine(name, stateText, ttl),
+      '; plain list of places to look (readable, unsigned)',
+      zoneLine(name, plain, ttl),
+      '; optional: lets people find you from the domain alone',
+      zoneLine(apexName(domain), plain, ttl),
+    ].join('\n');
+  }
+
+  const api = { PREFIX, MAX_TEXT, MAX_DEVICES, StateError, normalizeDomain, recordName, apexName, plainRecord, build, encode, txtStrings, zoneLine, zoneFile };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.NodetideState = api;
 })(typeof window !== 'undefined' ? window : globalThis);

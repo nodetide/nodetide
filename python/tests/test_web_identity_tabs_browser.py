@@ -164,6 +164,14 @@ async def test_sub_tabs_and_editing_distribution_points():
                 await asyncio.sleep(0.8)
                 assert await page.js(f"{comp('[x-data=stateRecordUI]')}.domain") == "example.org"
 
+                # the DNS card lists the points it may write in plain text, exactly as Python would
+                from nodetide.core.dns_source import parse_plain, plain_record
+                await page.js(f"{comp('[x-data=stateRecordUI]')}.days=7; {comp('[x-data=stateRecordUI]')}.generate()")
+                await asyncio.sleep(1.2)
+                made = await page.js(f"JSON.parse(JSON.stringify({comp('[x-data=stateRecordUI]')}.result))")
+                assert made["plain"] == plain_record(identity, points)
+                assert parse_plain(made["plain"])["dp"] == ["https://relay.example.org", "mailto:chains@node.example"]
+
                 # editing again replaces them (a second set_distribution on top of the first)
                 await page.js(f"{detail}.openDistributionModal(); {detail}.editDistributionPoints='https://other.example.org'; {detail}.saveDistributionPoints()")
                 await asyncio.sleep(1.2)

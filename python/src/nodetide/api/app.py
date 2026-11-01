@@ -215,6 +215,9 @@ def create_app(
         setup_oidc(app, oidc_config, app["storage"], fetch=oidc_fetch)
         logger.info(f"OIDC bridge enabled (issuer={oidc_config.issuer})")
 
+    if app.get("oidc") is not None:
+        app["oidc"].fetcher.dns = app["dns_state"]     # plain `dp=` lists in DNS are more places to look for an identity that names a domain
+
     # Nodes on the local network as a last-resort chain source (off unless NODETIDE_MDNS_DISCOVER=1)
     if os.environ.get("NODETIDE_MDNS_DISCOVER") == "1" and app.get("oidc") is not None:
         from nodetide.relay import RelayDiscovery

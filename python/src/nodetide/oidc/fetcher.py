@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable, Iterable
 from nodetide.core.auth import choose_sigchain
 from nodetide.core.identity import Sigchain
 from nodetide.core.storage import Storage
+from nodetide.core.dns_source import dns_domains
 from nodetide.mailresponder.addresses import mail_points
 from nodetide.oidc.netguard import http_fetch_sigchain, validate_source_url
 
@@ -71,6 +72,7 @@ class IdentityFetcher:
         ]
         self._fetch: FetchFn = fetch or self._default_fetch
         self._lan_fetch: FetchFn = lan_fetch or self._default_lan_fetch
+        self.dns = None    # DnsStateSource: plain `dp=` lists published at the identity's `dns:` points are more places to look
         self.lan = None    # LanSources: nodes found by mDNS on a network we are attached to (opt-in)
         self._on_update = on_update
         self._clock = clock
@@ -197,7 +199,7 @@ class IdentityFetcher:
             return True
         return False
 
-    def _sources(self, identity_hash: str, hints: list[str]) -> list[str]:
+    def _sources(self, identity_hash: str, hints: list[str], dns_points: list[str] = ()) -> list[str]:
         sources = list(hints)
         stored = self._storage.get_sigchain(identity_hash)
         if stored is not None:
@@ -206,20 +208,38 @@ class IdentityFetcher:
                     url = validate_source_url(point, self._allow_private)
                     if url and url not in sources:
                         sources.append(url)
+        for point in dns_points:                      # published in DNS by the identity's domain: the same checks as any other source
+            url = validate_source_url(point, self._allow_private)
+            if url and url not in sources:
+                sources.append(url)
         for seed in self._seeds:
             if seed not in sources:
                 sources.append(seed)
         return sources[:MAX_SOURCES]
 
-    def _mail_sources(self, identity_hash: str) -> list[str]:
-        """Mailboxes among the identity's own (signed) distribution points; hints from sign-in pages are never mail."""
+    def _own_points(self, identity_hash: str) -> list[str]:
+        """The distribution points in the identity's own (signed) chain; the newest setting wins."""
         stored = self._storage.get_sigchain(identity_hash)
-        if stored is None:
-            return []
         points: list[str] = []
-        for event in stored.events:
-            points = getattr(event, "distribution_points", None) or points   # the newest setting wins
-        return mail_points(points)
+        for event in (stored.events if stored is not None else []):
+            points = getattr(event, "distribution_points", None) or points
+        return points
+
+    async def _dns_points(self, identity_hash: str) -> list[str]:
+        """Places the identity's `dns:` domains list for it in plain text. Hints from sign-in pages never lead to a DNS lookup."""
+        if self.dns is None:
+            return []
+        out: list[str] = []
+        for domain in dns_domains(self._own_points(identity_hash))[:3]:
+            try:
+                out += [p for p in await self.dns.points(domain, identity_hash) if p not in out]
+            except Exception:
+                logger.debug("dns points lookup failed for %s", identity_hash[:12])
+        return out
+
+    def _mail_sources(self, identity_hash: str, dns_points: list[str] = ()) -> list[str]:
+        """Mailboxes among the identity's own (signed) distribution points and its DNS list; hints from sign-in pages are never mail."""
+        return mail_points(list(self._own_points(identity_hash)) + list(dns_points))
 
     async def deliver(self, identity_hash: str, events: list[dict[str, Any]]) -> None:
         """A chain arrived by another channel (an email answer): verify, store, finish the fetch if it is satisfied."""
@@ -248,7 +268,8 @@ class IdentityFetcher:
 
         updated = False
         error: str | None = None
-        for source in self._sources(identity_hash, json.loads(row["hints"])):
+        dns_points = await self._dns_points(identity_hash)
+        for source in self._sources(identity_hash, json.loads(row["hints"]), dns_points):
             try:
                 events = await self._fetch(source, identity_hash)
             except Exception as e:  # network errors, timeouts, blocked addresses
@@ -280,7 +301,7 @@ class IdentityFetcher:
         # Last resort: ask by email. The answer comes later through deliver(); this attempt only sends the request.
         if self.mail is not None and not self._satisfied(identity_hash, want_head):
             asked = 0
-            for address in self._mail_sources(identity_hash):
+            for address in self._mail_sources(identity_hash, dns_points):
                 if asked >= 2:
                     break
                 try:

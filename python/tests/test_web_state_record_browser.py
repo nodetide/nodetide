@@ -90,8 +90,15 @@ async def test_the_identity_tab_makes_a_record_python_accepts():
                 result = await page.js(f"JSON.parse(JSON.stringify({card}.result))")
                 assert result["domain"] == "example.org" and result["name"] == record_name("example.org", identity)
                 assert result["hasPoint"] is True and result["size"] == len(result["value"]) < 3800
-                assert result["zone"].startswith(f"{result['name']}. 300 IN TXT \"nt1;") and len(result["devices"]) == 1
+                assert f"{result['name']}. 300 IN TXT \"nt1;" in result["zone"] and len(result["devices"]) == 1
                 print("browser record:", result["size"], "characters,", len(result["devices"]), "device")
+
+                # the plain, readable list is what Python's writer makes and Python's reader takes; the zone text has the three records
+                from nodetide.core.dns_source import apex_name, parse_plain, plain_record
+                assert result["plain"] == plain_record(identity, ["dns:example.org"]) == f"v=nt1; id={identity}"
+                assert parse_plain(result["plain"]) == {"id": identity, "dp": []}
+                assert f"{result['name']}. 300 IN TXT \"{result['plain']}\"" in result["zone"]
+                assert f"{apex_name('example.org')}. 300 IN TXT \"{result['plain']}\"" in result["zone"]
 
                 # Python verifies it: master lineage, signature, identity, and the device the web client signs in with
                 state = verify_state(decode(result["value"]), expect_identity=identity)

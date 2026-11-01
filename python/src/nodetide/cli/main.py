@@ -269,7 +269,7 @@ def identity_dns_record(domain: str | None, valid_days: int, as_json: bool):
       nodetide identity set-distribution -d dns:example.org
       nodetide identity dns-record
     """
-    from nodetide.core.dns_source import dns_domains, record_name
+    from nodetide.core.dns_source import apex_name, dns_domains, plain_record, record_name
     from nodetide.core.state import StateError, build_state, encode, txt_strings
 
     storage = get_storage()
@@ -292,15 +292,74 @@ def identity_dns_record(domain: str | None, valid_days: int, as_json: bool):
     except StateError as e:
         raise click.ClickException(str(e))
     name = record_name(domain, chain.identity_hash)
+    own: list[str] = []
+    for event in chain.events:
+        own = getattr(event, "distribution_points", None) or own
+    plain = plain_record(chain.identity_hash, own)
+    shows_points = "dp=" in plain
     if as_json:
-        click.echo(json.dumps({"name": name, "type": "TXT", "value": text, "strings": txt_strings(text)}, indent=2))
+        click.echo(json.dumps({
+            "name": name, "type": "TXT", "value": text, "strings": txt_strings(text),
+            "plain": {"name": name, "value": plain}, "discovery": {"name": apex_name(domain), "value": plain},
+        }, indent=2))
         return
-    click.echo(f"Name:  {name}")
-    click.echo("Type:  TXT")
-    click.echo(f"Size:  {len(text)} characters")
-    click.echo("Value: " + " ".join(f'"{part}"' for part in txt_strings(text)))
+    click.echo("Signed state (who may act for you now):")
+    click.echo(f"  Name:  {name}")
+    click.echo("  Type:  TXT")
+    click.echo(f"  Size:  {len(text)} characters")
+    click.echo("  Value: " + " ".join(f'"{part}"' for part in txt_strings(text)))
+    click.echo("\nPlain list of places to look (readable, unsigned; add it at the same name):")
+    click.echo(f"  Name:  {name}")
+    click.echo("  Type:  TXT")
+    click.echo(f'  Value: "{plain}"')
+    if not shows_points:
+        click.echo("  (no https:// or mailto: distribution points to list yet)")
+    click.echo("\nOptional: let people find you from the domain alone (add as another value at):")
+    click.echo(f"  Name:  {apex_name(domain)}")
+    click.echo("  Type:  TXT")
+    click.echo(f'  Value: "{plain}"')
     if f"dns:{domain}" not in [p for e in chain.events for p in (getattr(e, "distribution_points", None) or [])]:
         click.echo(f"\nNote: add the distribution point so others know where to look: nodetide identity set-distribution -d dns:{domain}")
+
+
+@identity.command("dns-lookup")
+@click.argument("domain")
+@click.argument("identity_hash", required=False)
+def identity_dns_lookup(domain: str, identity_hash: str | None):
+    """Show what DNS publishes under DOMAIN: the identities it lists in plain text, and, for IDENTITY_HASH, its signed state and plain list.
+
+    Examples:
+      nodetide identity dns-lookup example.org
+      nodetide identity dns-lookup example.org 3d2bdbbd...
+    """
+    import asyncio
+    from nodetide.core.dns_source import DnsStateSource, apex_name, dns_point, record_name
+
+    domain = dns_point(f"dns:{domain}") or ""
+    if not domain:
+        raise click.ClickException("That is not a public domain name.")
+
+    async def run():
+        source = DnsStateSource()
+        click.echo(f"{apex_name(domain)}:")
+        found = await source.discover(domain)
+        if not found:
+            click.echo("  no plain record")
+        for entry in found:
+            click.echo(f"  {entry['id']}")
+            for point in entry["dp"]:
+                click.echo(f"      {point}")
+        if identity_hash:
+            click.echo(f"\n{record_name(domain, identity_hash)}:")
+            points = await source.points(domain, identity_hash)
+            click.echo("  plain list: " + (", ".join(points) if points else "none"))
+            state = await source.fetch(domain, identity_hash)
+            if state is None:
+                click.echo("  signed state: none (or it did not verify)")
+            else:
+                click.echo(f"  signed state: verified, {len(state.devices)} device(s), head {state.head_hash[:16]}..., valid until {state.expires}")
+
+    asyncio.run(run())
 
 
 @identity.command("set-recovery")

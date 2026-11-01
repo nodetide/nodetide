@@ -1255,7 +1255,8 @@
             <span class="card-title">DNS state record</span>
           </div>
           <p class="text-small text-muted">
-            A short, signed snapshot of who may act for this identity <em>now</em> (your master key, active devices and chain head), to publish as one DNS TXT record.
+            A short, signed snapshot of who may act for this identity <em>now</em> (your master key, active devices and chain head), to publish as a DNS TXT record,
+            next to a plain, readable list of your distribution points (<code>v=nt1; id=...; dp=https://...</code>) for people to find you by.
             Anyone can then check a sign-in against it without downloading your whole chain. DNS itself needs no trust: the record is signed by your master key.
             It expires, so republish it whenever your devices change.
           </p>
@@ -1279,11 +1280,12 @@
           <template x-if="result">
             <div class="mt-1">
               <div class="form-group">
-                <label>Add this TXT record to your DNS zone (<span x-text="result.size"></span> characters)</label>
-                <textarea readonly rows="5" x-model="result.zone" style="font-family: monospace; font-size: 0.75rem; width: 100%" @focus="$event.target.select()"></textarea>
+                <label>Add these TXT records to your DNS zone (the signed state is <span x-text="result.size"></span> characters)</label>
+                <textarea readonly rows="9" x-model="result.zone" style="font-family: monospace; font-size: 0.75rem; width: 100%" @focus="$event.target.select()"></textarea>
                 <div class="flex" style="gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap">
-                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.zone, 'Zone line copied')">Copy zone line</button>
-                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.value, 'Value copied')">Copy value only</button>
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.zone, 'Zone lines copied')">Copy all</button>
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.value, 'State value copied')">Copy state value only</button>
+                  <button type="button" class="btn btn-small btn-secondary" @click="copy(result.plain, 'Plain value copied')">Copy plain value only</button>
                   <button type="button" class="btn btn-small btn-secondary" @click="copy(result.name, 'Name copied')">Copy name</button>
                 </div>
               </div>
