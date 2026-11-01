@@ -3,6 +3,16 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (sigchains by email)
+
+- **Email as a distribution channel, read-only** (`nodetide.mailresponder`, `email-distribution.md`): a node can answer mail that asks for chains. Requests are lines `GET chain <hash> [light]
+  [since=<event> [from=<n>]]`, `GET content <hash> <seq>`, `GET info`; the reply is threaded to the request and carries the data as an attachment (`application/vnd.nodetide+json`), split into parts
+  when large. Email is an untrusted transport: the client (`MailClient`, `nodetide mail fetch`) verifies the chain's signatures, joins `since` answers onto what it holds, and rejects anything that
+  does not verify or is incomplete.
+- **Abuse controls**: answers only mail our own server found genuine (SPF/DKIM/DMARC from `Authentication-Results`, optionally only from named servers), only to the single From address (never
+  Reply-To), never to automatic or list mail or to itself, once per Message-ID, with limits per sender, per domain, overall, and a byte budget per sender; requests are size-capped and the grammar
+  is strict. Off unless `NODETIDE_MAIL_RESPONDER=1`; reads its mailbox over IMAP, replies through SMTP. Not switched on at the test stack: it needs a mailbox.
+
 ## 2026-11-02 (Android release signing)
 
 - **Play release pipeline**: `android-release.yml` builds the signed bundle from a tag `android-v*` (or by hand) in the `production` environment (required reviewer, tags only), checks the bundle is signed by the

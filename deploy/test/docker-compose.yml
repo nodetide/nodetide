@@ -40,6 +40,20 @@ services:
       NODETIDE_OIDC_ALLOW_INSECURE: ${ALLOW_INSECURE:-0}
       # the sign-in page offers "open in wallet" for the stack's wallet and for one on the user's own machine
       NODETIDE_OIDC_WALLET_URLS: ${NODE_URL},http://localhost:${LOCAL_WALLET_PORT:-4572}   # the web client is the wallet
+      # answers requests for sigchains that arrive by email (see email-distribution.md); off unless MAIL_RESPONDER=1
+      NODETIDE_MAIL_RESPONDER: ${MAIL_RESPONDER:-0}
+      NODETIDE_MAIL_ADDRESS: ${MAIL_ADDRESS:-}
+      NODETIDE_MAIL_IMAP_HOST: ${MAIL_IMAP_HOST:-}
+      NODETIDE_MAIL_IMAP_PORT: ${MAIL_IMAP_PORT:-993}
+      NODETIDE_MAIL_IMAP_SECURITY: ${MAIL_IMAP_SECURITY:-ssl}
+      NODETIDE_MAIL_IMAP_USER: ${MAIL_IMAP_USER:-}
+      NODETIDE_MAIL_IMAP_PASSWORD: ${MAIL_IMAP_PASSWORD:-}
+      NODETIDE_MAIL_TRUSTED_SERVERS: ${MAIL_TRUSTED_SERVERS:-}
+      NODETIDE_SMTP_HOST: ${SMTP_HOST:-mailpit}
+      NODETIDE_SMTP_PORT: ${SMTP_PORT:-1025}
+      NODETIDE_SMTP_SECURITY: ${SMTP_SECURITY:-none}
+      NODETIDE_SMTP_USER: ${SMTP_USER:-}
+      NODETIDE_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       # This node verifies nobody. It believes email attestations only from the verification service named in
       # /issuer/email-issuer (written by the verifier container; the entrypoint passes it on as NODETIDE_OIDC_EMAIL_ISSUERS).
     volumes:

@@ -64,6 +64,10 @@ async def on_startup(app: web.Application) -> None:
     if app.get("relay_poller"):
         await app["relay_poller"].start()
 
+    # Answer chain requests that arrive by email
+    if app.get("mail_poller"):
+        await app["mail_poller"].start()
+
     # Start mDNS announcement if enabled
     if app.get("relay_mdns"):
         await app["relay_mdns"].start()
@@ -73,6 +77,9 @@ async def on_startup(app: web.Application) -> None:
 
 async def on_cleanup(app: web.Application) -> None:
     """Called on application cleanup."""
+    if app.get("mail_poller"):
+        await app["mail_poller"].stop()
+
     # Stop mDNS announcement
     if app.get("relay_mdns"):
         await app["relay_mdns"].stop()
@@ -198,6 +205,12 @@ def create_app(
     if oidc_config is not None:
         setup_oidc(app, oidc_config, app["storage"], fetch=oidc_fetch)
         logger.info(f"OIDC bridge enabled (issuer={oidc_config.issuer})")
+
+    # Email responder (off unless NODETIDE_MAIL_RESPONDER=1)
+    from nodetide.mailresponder import config as mail_config
+    if mail_config.enabled():
+        app["mail_responder"], app["mail_poller"] = mail_config.build(app["storage"])
+        logger.info("Mail responder enabled (%s)", app["mail_responder"].config.address)
 
     # Setup lifecycle hooks
     app.on_startup.append(on_startup)

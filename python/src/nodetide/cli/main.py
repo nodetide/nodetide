@@ -43,8 +43,11 @@ def cli():
 
 from nodetide.cli.claims import claim as claim_group, eid as eid_group  # noqa: E402
 
+from nodetide.cli.mail import mail as mail_group  # noqa: E402
+
 cli.add_command(claim_group)
 cli.add_command(eid_group)
+cli.add_command(mail_group)
 
 # Identity commands
 

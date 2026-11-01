@@ -69,6 +69,14 @@ class SMTPSender:
                 server.login(self.username, self.password or "")
             server.send_message(message)
 
+    async def send_message(self, message: EmailMessage) -> None:
+        """Send a finished message (attachments, threading headers)."""
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, self._send_blocking, message)
+        except (OSError, smtplib.SMTPException) as e:
+            logger.warning("SMTP delivery failed: %s", type(e).__name__)
+            raise MailError("could not send the email") from e
+
     async def send(self, to: str, subject: str, body: str) -> None:
         message = build_message(self.from_addr, to, subject, body)
         try:
@@ -90,7 +98,13 @@ class MemorySender:
 
     def __init__(self) -> None:
         self.outbox: list[dict[str, str]] = []
+        self.messages: list[EmailMessage] = []   # whole messages sent with send_message
         self.fail = False
+
+    async def send_message(self, message: EmailMessage) -> None:
+        if self.fail:
+            raise MailError("simulated delivery failure")
+        self.messages.append(message)
 
     async def send(self, to: str, subject: str, body: str) -> None:
         if self.fail:
