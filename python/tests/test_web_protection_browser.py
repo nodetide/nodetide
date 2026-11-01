@@ -261,6 +261,11 @@ async def test_banner_backup_recovery_and_restore():
                 async with http.get(f"{base}/api/identities/{org_hash}") as r:
                     org_info = await r.json()
                 assert org_info["type"] == "organization" and org_info["verified"] is True
+                await page.js(f"{lost}.loadOrgs()")
+                await asyncio.sleep(0.8)
+                listed = await page.js(f"JSON.parse(JSON.stringify({lost}.orgs))")
+                assert [o["hash"] for o in listed] == [org_hash] and listed[0]["name"] == "Test verifier"
+                assert listed[0]["governance"] == "self" and listed[0]["owners"][0]["me"] is True and listed[0]["owners"][0]["share"] == 100
 
                 # the verifier, given the hash, has its organization authorize the signing key by itself
                 issuer = await asyncio.to_thread(load_owned, verifier_db, "Test verifier", org_hash, base, browser_trustee)

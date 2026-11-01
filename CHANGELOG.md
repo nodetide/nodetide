@@ -44,6 +44,9 @@ still open, so a new session can pick up without re-deriving context.
   node trusts the issuer in `NODETIDE_OIDC_ISSUERS_FILE` (the file the verifier publishes) and re-reads it when it changes, so it is not restarted either. The
   approval card fetches the founding request from the verification service by itself.
 
+- "Organizations you own" (Wallet tab) lists the organizations whose current owners include the active identity: name, kind, hash, owners with their share,
+  devices.
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.

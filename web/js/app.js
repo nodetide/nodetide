@@ -562,6 +562,28 @@
       return { complete: true, orgHash, genesis, name: genesis.name, owners: genesis.owners };
     },
 
+    async ownedOrganizations(ownerHash) {
+      /** Organizations on the node whose owners (as of now) include this identity. */
+      const listing = (await api.request('GET', '/identities')).identities || [];
+      const found = [];
+      for (const item of listing.filter(i => i.type === 'organization').slice(0, 200)) {
+        let info;
+        try { info = await api.getIdentity(item.identity_hash); } catch { continue; }
+        const events = info.sigchain || [];
+        let owners = null;
+        for (const e of events) if ((e.type === 'genesis' || e.type === 'set_owners') && e.owners) owners = e.owners;
+        if (!owners || !owners.some(o => o.identity === ownerHash)) continue;
+        const total = owners.reduce((n, o) => n + o.weight, 0);
+        found.push({
+          hash: item.identity_hash, name: info.name || '(unnamed)', governance: (events[0] && events[0].governance) || 'self',
+          owners: owners.map(o => ({ ...o, share: Math.round(100 * o.weight / total), me: o.identity === ownerHash })),
+          devices: (info.devices || []).map(d => ({ label: d.label, key: d.pubkey.slice(0, 12) })),
+          verified: info.verified, created: events[0] ? events[0].timestamp : null,
+        });
+      }
+      return found;
+    },
+
     async authorizeDevice(ownerHash, ownerPassword, orgHash, requestText) {
       /** In a "managed" organization the owners authorize its devices: approve an add_device for the verifier's signing key. */
       const owner = this.getIdentity(ownerHash);
@@ -1837,6 +1859,16 @@
       org: { password: '', request: '', result: null, service: '' },
       dev: { password: '', orgHash: '', request: '' },
 
+      orgs: [],
+      orgsLoaded: false,
+
+      async loadOrgs() {
+        const hash = Alpine.store('identity').activeHash;
+        if (!hash) { this.orgs = []; return; }
+        try { this.orgs = await KeyStore.ownedOrganizations(hash); } catch { this.orgs = []; }
+        this.orgsLoaded = true;
+      },
+
       async fetchRequest(quiet) {
         /** Ask the verification service for the founding request, so nobody has to copy JSON around. */
         try {
@@ -1861,6 +1893,7 @@
           this.org.result = await KeyStore.approveOrganization(
             Alpine.store('identity').activeHash, this.org.password, this.org.request);
           this.org.password = '';
+          this.loadOrgs();
           Alpine.store('app').showSuccess(this.org.result.complete
             ? 'The organization is founded.' : 'Approved. Pass the result on to the next owner.');
         } catch (e) {

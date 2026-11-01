@@ -1261,10 +1261,29 @@
           </p>
         </div>
       </div>
-        <div class="card" x-data="protectionUI" x-show="$store.identity.activeHash" x-init="fetchRequest(true)">
+        <div class="card" x-data="protectionUI" x-show="$store.identity.activeHash" x-init="fetchRequest(true); loadOrgs()"
+             x-effect="$store.identity.activeHash; loadOrgs()">
           <div class="card-header">
             <span class="card-title">Organizations you own</span>
           </div>
+          <p class="text-small text-muted" x-show="orgsLoaded && orgs.length === 0">You do not own any organization yet.</p>
+          <template x-for="o in orgs" :key="o.hash">
+            <div class="mb-1" style="padding: 0.5rem 0; border-bottom: 1px solid var(--border, #ddd)">
+              <div>
+                <strong x-text="o.name"></strong>
+                <span class="text-small text-muted" x-text="o.governance === 'managed' ? '(managed: owners approve device changes)' : '(self-run: its own key handles devices)'"></span>
+                <span x-show="o.verified" style="color: var(--success)">&#10003;</span>
+              </div>
+              <div class="text-small"><code x-text="o.hash" style="word-break: break-all"></code></div>
+              <div class="text-small text-muted">
+                owners:
+                <template x-for="w in o.owners" :key="w.identity">
+                  <span><span x-text="w.me ? 'you' : w.identity.slice(0, 12)"></span> <span x-text="w.share + '%'"></span>; </span>
+                </template>
+                devices: <span x-text="o.devices.map(d => d.label).join(', ') || 'none'"></span>
+              </div>
+            </div>
+          </template>
           <p class="text-small text-muted mb-1">
             An organization (a verification service, say) runs itself with its own key. Its owners found it and are the only
             ones who can recover that key or change the owners. Paste the organization's founding request (a verifier shows it
