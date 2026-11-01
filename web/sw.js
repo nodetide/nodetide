@@ -2,7 +2,7 @@
  * Service Worker - offline support for Nodetide web client
  */
 
-const CACHE_NAME = 'nodetide-v7';
+const CACHE_NAME = 'nodetide-v8';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -76,33 +76,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets - cache first, fallback to network
+  // The app itself - network first, so a new version is used on the very next load. The cache is only the offline
+  // fallback: a wallet must never keep running old code because an old copy was quicker.
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return cached, but also update cache in background
-        event.waitUntil(
-          fetch(event.request).then((networkResponse) => {
-            if (networkResponse.ok) {
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(event.request, networkResponse);
-              });
-            }
-          }).catch(() => {})
-        );
-        return cachedResponse;
+    fetch(event.request, { cache: 'no-cache' }).then((networkResponse) => {
+      if (networkResponse.ok && url.origin === self.location.origin) {
+        const copy = networkResponse.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
       }
-
-      // Not in cache - fetch from network and cache
-      return fetch(event.request).then((networkResponse) => {
-        if (networkResponse.ok) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      });
+      return networkResponse;
+    }).catch(async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      if (event.request.mode === 'navigate') {
+        const shell = await caches.match('/');
+        if (shell) return shell;
+      }
+      return new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
     })
   );
 });

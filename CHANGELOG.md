@@ -60,6 +60,10 @@ still open, so a new session can pick up without re-deriving context.
 
 - Explorer: `#/identity/<start of hash>` and `#/event/<start of hash>` resolve to the one match (or list several / say none) instead of "Page not found".
 
+- **Service worker fixed** (`web/sw.js`): it served the app from its cache and refreshed it in the background, so a browser showed the previous version until a
+  second reload (and the explorer/wallet changes looked missing). The app is now network first (cache only as the offline fallback), cache name bumped. Test:
+  `test_a_new_version_of_the_app_is_used_on_the_next_load` (fails with the old worker).
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.

@@ -447,3 +447,61 @@ async def test_explorer_accepts_the_start_of_a_hash():
             except subprocess.TimeoutExpired:
                 chrome.kill()
         await node.close()
+
+
+async def test_a_new_version_of_the_app_is_used_on_the_next_load():
+    """The service worker must not keep serving an old copy of the app (it once did, until a second reload)."""
+    import shutil
+
+    web = tempfile.mkdtemp()
+    shutil.copytree(WEB, web, dirs_exist_ok=True)
+    node = TestServer(create_app(storage=Storage.memory(), web_root=web))
+    await node.start_server()
+    base = f"http://127.0.0.1:{node.port}"
+    chrome = None
+    try:
+        async with aiohttp.ClientSession() as http:
+            chrome = subprocess.Popen(
+                [CHROME, "--headless=new", f"--remote-debugging-port={CDP_PORT}", f"--user-data-dir={tempfile.mkdtemp()}",
+                 "--no-first-run", "--disable-gpu", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            tabs = None
+            for _ in range(50):
+                try:
+                    async with http.get(f"http://127.0.0.1:{CDP_PORT}/json") as r:
+                        tabs = await r.json()
+                        break
+                except aiohttp.ClientError:
+                    await asyncio.sleep(0.2)
+            tab = next(t for t in tabs if t["type"] == "page")
+            async with http.ws_connect(tab["webSocketDebuggerUrl"]) as ws:
+                page = Page(ws)
+                await page.call("Runtime.enable")
+                await page.call("Page.enable")
+
+                async def load():
+                    await page.call("Page.navigate", url=base + "/")
+                    await asyncio.sleep(2)
+
+                await load()
+                for _ in range(50):  # wait until the worker controls the page
+                    if await page.js("!!navigator.serviceWorker.controller"):
+                        break
+                    await load()
+                assert await page.js("!!navigator.serviceWorker.controller") is True
+                assert await page.js("window.__marker") is None
+
+                path = os.path.join(web, "js", "app.js")
+                with open(path) as f:
+                    source = f.read()
+                with open(path, "w") as f:
+                    f.write("window.__marker = 2;\n" + source)
+                await load()
+                assert await page.js("window.__marker") == 2  # the very next load, not the one after
+    finally:
+        if chrome:
+            chrome.terminate()
+            try:
+                chrome.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                chrome.kill()
+        await node.close()
