@@ -276,12 +276,22 @@ async def test_passkey_unlocks_the_wallet():
                 assert await page.js(f"{wallet}.hasPasskey") is False
                 assert "No passkey" in await attempt(f"await {wallet}.unlockWithPasskey();")
 
+                # forms ask for the identity password only when nothing else can supply it
+                await load()
+                assert await page.js("Alpine.store('protection').needsPassword") is True  # locked, no passkey (it was removed)
+                assert await attempt(f"const c={wallet}; c.password='passkey-pass-12'; await c.unlock();") is None
+                assert await page.js("Alpine.store('protection').needsPassword") is False   # unlocked wallet vouches for it
+                assert "unlocked wallet" in await page.js("Alpine.store('protection').passwordHint")
+
                 # an identity made WITH a passkey has no password at all
                 assert await page.js(f"{comp('[x-data=identityManager]')}.webauthnSupported") is True
                 await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'no-password',
                     method:'webauthn',password:'',confirmPassword:'',distributionPoints:''}}; await m.createIdentity();}})()""")
                 await asyncio.sleep(1.5)
                 made = await page.js("JSON.parse(JSON.stringify(Alpine.store('identity').activeIdentity))")
+                await load()
+                assert await page.js("Alpine.store('protection').needsPassword") is False   # passkey identity, wallet locked
+                assert "passkey" in await page.js("Alpine.store('protection').passwordHint")
                 assert made["name"] == "no-password" and made["storageMethod"] == "webauthn" and made["passkey"]
                 async with http.get(f"{base}/api/identities/{made['identityHash']}") as r:
                     assert r.status == 200 and (await r.json())["verified"] is True

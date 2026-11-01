@@ -374,6 +374,8 @@
     async _pw(identity, password) {
       /** The typed password, or (none typed, identity has a passkey) the one the authenticator unwraps. */
       if (password) return password;
+      const open = identity && WalletSession.get(identity.identityHash); // an unlocked wallet already holds it in memory
+      if (open) return open.password;
       if (identity && identity.passkey) return Passkey.password(identity.identityHash);
       return password;
     },
@@ -1525,6 +1527,16 @@
       init() { this.refresh(); },
 
       get show() { return !!this.hash && !(this.backupAt && this.recoveryDone); },
+      // Does a form have to ask for the identity password? Not when a passkey or an unlocked wallet can supply it.
+      get needsPassword() {
+        const identity = Alpine.store('identity').activeIdentity;
+        return !(identity && identity.passkey) && !Alpine.store('wallet').unlocked;
+      },
+      get passwordHint() {
+        const identity = Alpine.store('identity').activeIdentity;
+        return Alpine.store('wallet').unlocked ? 'The unlocked wallet confirms this for you.'
+          : (identity && identity.passkey ? 'Your passkey will ask you to confirm.' : '');
+      },
       get backupDone() { return !!this.backupAt; },
 
       async refresh() {

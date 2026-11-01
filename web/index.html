@@ -656,10 +656,11 @@
           PBKDF2-SHA256 (1,000,000 rounds) and AES-256-GCM. Keep it and its password apart, away from this computer.
         </p>
         <form @submit.prevent="makeBackup">
-          <div class="form-group">
+          <div class="form-group" x-show="$store.protection.needsPassword">
             <label>This identity's password (unlocks the keys)</label>
             <input type="password" x-model="backup.identityPassword" autocomplete="current-password">
           </div>
+          <p class="text-small text-muted mb-1" x-show="!$store.protection.needsPassword" x-text="$store.protection.passwordHint"></p>
           <div class="form-group">
             <label>Backup password (at least 12 characters; a few random words work well)</label>
             <input type="password" x-model="backup.password" autocomplete="new-password" minlength="12" required>
@@ -696,10 +697,11 @@
             <label>How many must agree (2 or more)</label>
             <input type="number" x-model="recovery.threshold" min="2" required>
           </div>
-          <div class="form-group">
+          <div class="form-group" x-show="$store.protection.needsPassword">
             <label>This identity's password (signs the change with the master key)</label>
             <input type="password" x-model="recovery.identityPassword" autocomplete="current-password">
           </div>
+          <p class="text-small text-muted mb-1" x-show="!$store.protection.needsPassword" x-text="$store.protection.passwordHint"></p>
           <button type="submit" class="btn" style="width: 100%" :disabled="$store.app.loading">
             <span x-show="!$store.app.loading">Set up recovery</span>
             <span x-show="$store.app.loading">Signing...</span>
@@ -1438,10 +1440,11 @@
             <label>Founding request (JSON)</label>
             <textarea x-model="org.request" rows="5" required></textarea>
           </div>
-          <div class="form-group">
+          <div class="form-group" x-show="$store.protection.needsPassword">
             <label>Active identity's password (signs as owner)</label>
             <input type="password" x-model="org.password" autocomplete="current-password">
           </div>
+          <p class="text-small text-muted mb-1" x-show="!$store.protection.needsPassword" x-text="$store.protection.passwordHint"></p>
           <button type="submit" class="btn" :disabled="$store.app.loading">Approve</button>
         </form>
         <template x-if="org.result && org.result.complete">
@@ -1466,10 +1469,11 @@
             <label>Request (JSON from the verifier)</label>
             <textarea x-model="dev.request" rows="3" required></textarea>
           </div>
-          <div class="form-group">
+          <div class="form-group" x-show="$store.protection.needsPassword">
             <label>Active identity's password</label>
             <input type="password" x-model="dev.password" autocomplete="current-password">
           </div>
+          <p class="text-small text-muted mb-1" x-show="!$store.protection.needsPassword" x-text="$store.protection.passwordHint"></p>
           <button type="submit" class="btn" :disabled="$store.app.loading">Authorize the key</button>
         </form>
       </div>

@@ -33,7 +33,8 @@ still open, so a new session can pick up without re-deriving context.
   protocol's keys are still Ed25519 and the backup file remains the safety net.
   Also in "Create Identity": the Passkey option (it was hard-disabled as "not supported") makes an identity with NO password: a random secret generated in the
   browser, held only wrapped by the passkey (`storageMethod: webauthn`). Forms that ask for the identity password accept an empty field for such an identity
-  and the passkey stands in (backup, recovery, organization approval, unlock).
+  and the passkey stands in (backup, recovery, organization approval, unlock). Those forms no longer show the "identity password" field at all when a passkey or
+  an unlocked wallet can supply it (`protection.needsPassword`); they say who confirms instead.
 
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
