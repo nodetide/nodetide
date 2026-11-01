@@ -2,7 +2,7 @@
 # Multi-stage build for smaller final image
 
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /build
 
@@ -23,7 +23,7 @@ COPY golang/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o nodetide .
 
 # Runtime stage
-FROM alpine:3.19
+FROM alpine:3.24
 
 RUN apk --no-cache add ca-certificates && \
     adduser -D -s /bin/sh nodetide

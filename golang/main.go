@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/alexkuklin/distriblog/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/nodetide/nodetide/golang/auth"
 )
 
 //go:embed web

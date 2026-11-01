@@ -1,0 +1,1955 @@
+{
+ "cases": [
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "06b39bcbf736bf5eb448b8f8bca1202615642ebb1a60d4195c7642dc9abaf47e",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "signature": "fa8ede7a3ccbc4cef5c974a75f72846ca85ca883eccfc7fa51eb00cdefa6160e17f53f0e457cd59a09e3d779ac52cc7e6dfb0d13a342deb2d4fb3745d7d87a02",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "authenticate",
+      "manage_claims"
+     ],
+     "device_encryption_pubkey": "a888dede3801d9efd93bb1ba5a18d6ec7a535ed0a470c62ea09796fa20eeee66",
+     "device_pubkey": "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "phone",
+     "prev": "4cc7fa2424bcb54180879bf42d81358ef4fb7aeaf04df13b0a8ff1dd2e06ef78",
+     "signature": "2cf445f654ff80e7e4d6cf548141a308aed0c5c4d146ae1f8c2a88d9e2f2feecad20771526307b6f0c91b0890fc97f8fbe3d9cf963724f8078257414a3aefe09",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "content": {
+      "count": 3,
+      "root": "a5c802f7f0d73259d69c7ec4fd8d4abb2bf6d9e67a933f0b3ff2e1e4b0c5dbb4"
+     },
+     "hash_alg": "sha256",
+     "prev": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+     "signature": "8fc289dcfa8b19fae2fcd06fcc4ef8fdf759f6cd3a303f1f07a62fdab576b692023f223cab5a05141b07bde12a5dbcb7405cd00cbb0a5e509498ce5e571f8508",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "checkpoint",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000001",
+     "content": {
+      "count": 4,
+      "root": "fbf449808b5f1525ec970794d3cc22cc91eea1df927c707632733475f97fddbc"
+     },
+     "hash_alg": "sha256",
+     "prev": "0fe43cab846238bc6b2d2d7f512240698d8841781d66f28f5b59c048a4cc6ed5",
+     "reason": "gone",
+     "signature": "e9dfe9557440cd602f67c3b3811aeef1e1cbe3a3ad43e29055a0e76aebbbbe862f3c9eb7293cbd5e1e856007b45378df5e5e64ddc60178dca31e6fff5c252003",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "revoke_claim",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "authenticate"
+     ],
+     "content": {
+      "count": 4,
+      "root": "fbf449808b5f1525ec970794d3cc22cc91eea1df927c707632733475f97fddbc"
+     },
+     "device_encryption_pubkey": "ab13a44b41da4aed8488237416354b58596be678e7ca2fd78bf29b6cbaefdc66",
+     "device_pubkey": "802c956a6bc771d4cba4d2ae188349f72c0d455b9c256a99658f82bf96b63af0",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "laptop",
+     "prev": "03501e870da6b0889bd26139ebb821aa4c0d0155cbabbe0cb1b5c9024c350b10",
+     "signature": "4a2d934000687f4dd3b6bc50f742d846919e47fc3afe8a8abcb78663fd1b919568e69622a127fa938e2b02fb4df0ee5f366e64b5c49886e298540673adbda50b",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000000",
+     "claim_type": "email",
+     "commitment": "1111111111111111111111111111111111111111111111111111111111111111",
+     "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+     "expires": null,
+     "hash_alg": "sha256",
+     "prev": null,
+     "seq": 0,
+     "signature": "3be2f726b572d50a7cab0aed6424125a68146ebccb7c8bc4ab4c0c4a26a231626099dc37978c9cd469150af89a5fc875ca2ef62a6a4b28e47a47cb1bc573200e",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "add_claim",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000001",
+     "claim_type": "phone",
+     "commitment": "2222222222222222222222222222222222222222222222222222222222222222",
+     "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+     "expires": null,
+     "hash_alg": "sha256",
+     "prev": "885c505c3bbeda4bd3c41c81bf012e90b346c91fbc227c9794a2cbdfb489ec2f",
+     "seq": 1,
+     "signature": "d96391ebb314793a038afb8202558bb9f3bc72e192a07ab648470cb397487774aa5503bc9248da2ed1978ed1c04920cde9e5754ab82178c5bd24d2f3f18c3605",
+     "signed_by": "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3",
+     "timestamp": 1793536735,
+     "type": "add_claim",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000002",
+     "claim_type": "email",
+     "commitment": "3333333333333333333333333333333333333333333333333333333333333333",
+     "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+     "expires": null,
+     "hash_alg": "sha256",
+     "prev": "be037ed708b8f22057056f9040d296e8b5fe7faabff5cf2f14078915c56217aa",
+     "seq": 2,
+     "signature": "61080a166fd1da0d19edb5ac98e1029e56d971df3e7a597e90631519838a8b09280f8bdb07989da47a8d7fcdfb135b80b3bf84affb4b4d4d50888cf199d76705",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "add_claim",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_type": "email",
+     "control_ref": "0fe43cab846238bc6b2d2d7f512240698d8841781d66f28f5b59c048a4cc6ed5",
+     "hash_alg": "sha256",
+     "order": [
+      "claim-id-0000000002",
+      "claim-id-0000000000"
+     ],
+     "prev": "36dec6d63b7215753386ba1cd9e85775c868f7a40fc23fd954ad01fbc761e8b1",
+     "seq": 3,
+     "signature": "2b9cb483716697b6d49f2e5a215b32d5b79ad4ea91052c71d181cf51bbe1309448b857ac8c2ff6bc0a01c497a43452760854c91330de3bd844a5d4a793d66102",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "set_claim_order",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "802c956a6bc771d4cba4d2ae188349f72c0d455b9c256a99658f82bf96b63af0",
+     "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3"
+    ],
+    "claims": [
+     {
+      "id": "claim-id-0000000000",
+      "revoked": false,
+      "type": "email"
+     },
+     {
+      "id": "claim-id-0000000001",
+      "revoked": true,
+      "type": "phone"
+     },
+     {
+      "id": "claim-id-0000000002",
+      "revoked": false,
+      "type": "email"
+     }
+    ],
+    "content_length": 4,
+    "control_length": 5,
+    "device_status": {
+     "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3": {
+      "capabilities": [
+       "authenticate",
+       "manage_claims"
+      ],
+      "expires": null,
+      "known": true,
+      "revoked": false,
+      "untrusted_since": null
+     }
+    },
+    "head": "a423efa15849848da70228fefc72d651d43aeb79e186c55405c5cba72bb9f617",
+    "identity": "4cc7fa2424bcb54180879bf42d81358ef4fb7aeaf04df13b0a8ff1dd2e06ef78",
+    "master": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+    "partial": false,
+    "valid": true
+   },
+   "name": "personal-basic",
+   "related": {},
+   "why": "devices, three claims (one signed by a manage_claims device), a checkpoint, an order, a revocation"
+  },
+  {
+   "attach": [
+    {
+     "event": {
+      "alg": "ed25519",
+      "claim_id": "claim-id-0000000000",
+      "claim_type": "email",
+      "commitment": "1111111111111111111111111111111111111111111111111111111111111111",
+      "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+      "expires": null,
+      "hash_alg": "sha256",
+      "prev": null,
+      "seq": 0,
+      "signature": "3be2f726b572d50a7cab0aed6424125a68146ebccb7c8bc4ab4c0c4a26a231626099dc37978c9cd469150af89a5fc875ca2ef62a6a4b28e47a47cb1bc573200e",
+      "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+      "timestamp": 1793536735,
+      "type": "add_claim",
+      "version": 1
+     },
+     "ok": true,
+     "proof": [
+      "dde660d8c166e31af52a748442360da53830ae1767f31ef3c0ddd050f5bb7d50",
+      "3a0f3ac2d556adaac97d91779b1f52d524e35eef7cc65a96fe4a481e28b870cd"
+     ],
+     "seq": 0
+    },
+    {
+     "event": {
+      "alg": "ed25519",
+      "claim_id": "claim-id-0000000001",
+      "claim_type": "phone",
+      "commitment": "2222222222222222222222222222222222222222222222222222222222222222",
+      "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+      "expires": null,
+      "hash_alg": "sha256",
+      "prev": "885c505c3bbeda4bd3c41c81bf012e90b346c91fbc227c9794a2cbdfb489ec2f",
+      "seq": 1,
+      "signature": "d96391ebb314793a038afb8202558bb9f3bc72e192a07ab648470cb397487774aa5503bc9248da2ed1978ed1c04920cde9e5754ab82178c5bd24d2f3f18c3605",
+      "signed_by": "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3",
+      "timestamp": 1793536735,
+      "type": "add_claim",
+      "version": 1
+     },
+     "ok": true,
+     "proof": [
+      "d5febbb288fe0e080508c4d64413bb9ad1abc3435f746ed3f756b84732aa84eb",
+      "3a0f3ac2d556adaac97d91779b1f52d524e35eef7cc65a96fe4a481e28b870cd"
+     ],
+     "seq": 1
+    },
+    {
+     "event": {
+      "alg": "ed25519",
+      "claim_id": "claim-id-0000000002",
+      "claim_type": "email",
+      "commitment": "3333333333333333333333333333333333333333333333333333333333333333",
+      "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+      "expires": null,
+      "hash_alg": "sha256",
+      "prev": "be037ed708b8f22057056f9040d296e8b5fe7faabff5cf2f14078915c56217aa",
+      "seq": 2,
+      "signature": "61080a166fd1da0d19edb5ac98e1029e56d971df3e7a597e90631519838a8b09280f8bdb07989da47a8d7fcdfb135b80b3bf84affb4b4d4d50888cf199d76705",
+      "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+      "timestamp": 1793536735,
+      "type": "add_claim",
+      "version": 1
+     },
+     "ok": true,
+     "proof": [
+      "71c417cef14521131bc18e321c47b1581efed8904910ead0374730541d935cad"
+     ],
+     "seq": 2
+    },
+    {
+     "event": {
+      "alg": "ed25519",
+      "claim_type": "email",
+      "control_ref": "0fe43cab846238bc6b2d2d7f512240698d8841781d66f28f5b59c048a4cc6ed5",
+      "hash_alg": "sha256",
+      "order": [
+       "claim-id-0000000002",
+       "claim-id-0000000000"
+      ],
+      "prev": "36dec6d63b7215753386ba1cd9e85775c868f7a40fc23fd954ad01fbc761e8b1",
+      "seq": 3,
+      "signature": "2b9cb483716697b6d49f2e5a215b32d5b79ad4ea91052c71d181cf51bbe1309448b857ac8c2ff6bc0a01c497a43452760854c91330de3bd844a5d4a793d66102",
+      "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+      "timestamp": 1793536735,
+      "type": "set_claim_order",
+      "version": 1
+     },
+     "ok": true,
+     "proof": [
+      "3a0f3ac2d556adaac97d91779b1f52d524e35eef7cc65a96fe4a481e28b870cd",
+      "71c417cef14521131bc18e321c47b1581efed8904910ead0374730541d935cad"
+     ],
+     "seq": 3
+    },
+    {
+     "event": {
+      "alg": "ed25519",
+      "claim_id": "claim-id-0000000000",
+      "claim_type": "email",
+      "commitment": "0000000000000000000000000000000000000000000000000000000000000000",
+      "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+      "expires": null,
+      "hash_alg": "sha256",
+      "prev": null,
+      "seq": 0,
+      "signature": "3be2f726b572d50a7cab0aed6424125a68146ebccb7c8bc4ab4c0c4a26a231626099dc37978c9cd469150af89a5fc875ca2ef62a6a4b28e47a47cb1bc573200e",
+      "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+      "timestamp": 1793536735,
+      "type": "add_claim",
+      "version": 1
+     },
+     "ok": false,
+     "proof": [
+      "dde660d8c166e31af52a748442360da53830ae1767f31ef3c0ddd050f5bb7d50",
+      "3a0f3ac2d556adaac97d91779b1f52d524e35eef7cc65a96fe4a481e28b870cd"
+     ],
+     "seq": 0
+    },
+    {
+     "event": {
+      "alg": "ed25519",
+      "claim_id": "claim-id-0000000000",
+      "claim_type": "email",
+      "commitment": "1111111111111111111111111111111111111111111111111111111111111111",
+      "control_ref": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+      "expires": null,
+      "hash_alg": "sha256",
+      "prev": null,
+      "seq": 0,
+      "signature": "3be2f726b572d50a7cab0aed6424125a68146ebccb7c8bc4ab4c0c4a26a231626099dc37978c9cd469150af89a5fc875ca2ef62a6a4b28e47a47cb1bc573200e",
+      "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+      "timestamp": 1793536735,
+      "type": "add_claim",
+      "version": 1
+     },
+     "ok": false,
+     "proof": [
+      "d5febbb288fe0e080508c4d64413bb9ad1abc3435f746ed3f756b84732aa84eb",
+      "3a0f3ac2d556adaac97d91779b1f52d524e35eef7cc65a96fe4a481e28b870cd"
+     ],
+     "seq": 1
+    }
+   ],
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "06b39bcbf736bf5eb448b8f8bca1202615642ebb1a60d4195c7642dc9abaf47e",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "signature": "fa8ede7a3ccbc4cef5c974a75f72846ca85ca883eccfc7fa51eb00cdefa6160e17f53f0e457cd59a09e3d779ac52cc7e6dfb0d13a342deb2d4fb3745d7d87a02",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "authenticate",
+      "manage_claims"
+     ],
+     "device_encryption_pubkey": "a888dede3801d9efd93bb1ba5a18d6ec7a535ed0a470c62ea09796fa20eeee66",
+     "device_pubkey": "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "phone",
+     "prev": "4cc7fa2424bcb54180879bf42d81358ef4fb7aeaf04df13b0a8ff1dd2e06ef78",
+     "signature": "2cf445f654ff80e7e4d6cf548141a308aed0c5c4d146ae1f8c2a88d9e2f2feecad20771526307b6f0c91b0890fc97f8fbe3d9cf963724f8078257414a3aefe09",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "content": {
+      "count": 3,
+      "root": "a5c802f7f0d73259d69c7ec4fd8d4abb2bf6d9e67a933f0b3ff2e1e4b0c5dbb4"
+     },
+     "hash_alg": "sha256",
+     "prev": "09f988eb234f6402240ce0759405f81ca439194e00d3bc0777653aac9e5d23f0",
+     "signature": "8fc289dcfa8b19fae2fcd06fcc4ef8fdf759f6cd3a303f1f07a62fdab576b692023f223cab5a05141b07bde12a5dbcb7405cd00cbb0a5e509498ce5e571f8508",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "checkpoint",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000001",
+     "content": {
+      "count": 4,
+      "root": "fbf449808b5f1525ec970794d3cc22cc91eea1df927c707632733475f97fddbc"
+     },
+     "hash_alg": "sha256",
+     "prev": "0fe43cab846238bc6b2d2d7f512240698d8841781d66f28f5b59c048a4cc6ed5",
+     "reason": "gone",
+     "signature": "e9dfe9557440cd602f67c3b3811aeef1e1cbe3a3ad43e29055a0e76aebbbbe862f3c9eb7293cbd5e1e856007b45378df5e5e64ddc60178dca31e6fff5c252003",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "revoke_claim",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "authenticate"
+     ],
+     "content": {
+      "count": 4,
+      "root": "fbf449808b5f1525ec970794d3cc22cc91eea1df927c707632733475f97fddbc"
+     },
+     "device_encryption_pubkey": "ab13a44b41da4aed8488237416354b58596be678e7ca2fd78bf29b6cbaefdc66",
+     "device_pubkey": "802c956a6bc771d4cba4d2ae188349f72c0d455b9c256a99658f82bf96b63af0",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "laptop",
+     "prev": "03501e870da6b0889bd26139ebb821aa4c0d0155cbabbe0cb1b5c9024c350b10",
+     "signature": "4a2d934000687f4dd3b6bc50f742d846919e47fc3afe8a8abcb78663fd1b919568e69622a127fa938e2b02fb4df0ee5f366e64b5c49886e298540673adbda50b",
+     "signed_by": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+     "802c956a6bc771d4cba4d2ae188349f72c0d455b9c256a99658f82bf96b63af0",
+     "c02ed4f6fde21f57392f383a78c10a8b48cb04ed01c25842b0035849d91633f3"
+    ],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 5,
+    "head": "a423efa15849848da70228fefc72d651d43aeb79e186c55405c5cba72bb9f617",
+    "identity": "4cc7fa2424bcb54180879bf42d81358ef4fb7aeaf04df13b0a8ff1dd2e06ef78",
+    "master": "4422d9972c154d267b17749c703aba02d06045cd662f66a2753e72f9dd54cc8f",
+    "partial": true,
+    "valid": true
+   },
+   "name": "personal-light",
+   "related": {},
+   "why": "the same chain without its content (control events only), plus proofs for single content events"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "b71e0501b78cb3ddb685588b236d611317847016c56548262c4ddc0150c9801b",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "\u0410\u043b\u0435\u043a\u0441 \ud83d\ude00 \"quoted\" \\ back",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "1e3eced912b6eafdb3439d26f63362c6eff6421ac5b43cdb6f1b77a54717fbed",
+     "signature": "804cb3c41254babd30b88b754ef0bced2556bb48af9a76d19b51aa9ebfc375b3ad3e318b31d2e8db5a1dafc85add3f30795f7bb5c9fedba14de89cd3782a3009",
+     "signed_by": "1e3eced912b6eafdb3439d26f63362c6eff6421ac5b43cdb6f1b77a54717fbed",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "authenticate"
+     ],
+     "device_encryption_pubkey": "1ccd4d526c4525d80f36179a6752a7f2e081b8e45692eeb487d00628f50d5b02",
+     "device_pubkey": "9998e82028570574b24b6c75850a7a84c7e5899fc69afeb7ad31abc099314829",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "\u0442\u0435\u043b\u0435\u0444\u043e\u043d",
+     "prev": "94ede71472f61e06a2f947cec0f0d253778a27794be8ab9cc4d267ff8533c4d4",
+     "signature": "d79ffdb14a1f2a526444fb2df11929b77df955d184811368fe6dd54b9f2642654d54477cb4b427c89c5ba8bbd529f23c0108729b5d4ea9c3db8e53b3825a9f0e",
+     "signed_by": "1e3eced912b6eafdb3439d26f63362c6eff6421ac5b43cdb6f1b77a54717fbed",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "1e3eced912b6eafdb3439d26f63362c6eff6421ac5b43cdb6f1b77a54717fbed",
+     "9998e82028570574b24b6c75850a7a84c7e5899fc69afeb7ad31abc099314829"
+    ],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 2,
+    "head": "c5597f3126a46a84570624720f883336610bea3f0c13c22dd76887e071b2432b",
+    "identity": "94ede71472f61e06a2f947cec0f0d253778a27794be8ab9cc4d267ff8533c4d4",
+    "master": "1e3eced912b6eafdb3439d26f63362c6eff6421ac5b43cdb6f1b77a54717fbed",
+    "partial": false,
+    "valid": true
+   },
+   "name": "non-ascii",
+   "related": {},
+   "why": "names and labels with non-ASCII characters, quotes and backslashes (canonical JSON escaping)"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "31306bac80d3568880710bc8ba9adbef49ad7661f7d71c14c73e2ffbf061f93c",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "1d6807bd42976068d9c8e83d2f335ee030a2e1fb1ad1944b03197068cea6f22b",
+     "signature": "07bc5f2cd3327cfc3ef7d7da01a9aaf99a633d32149c17eefb2e3971bdc6a7b7d194bbe2d3c3e4c9acf820a38b55beda25aebbc9d252e28636ea262bd6e0560c",
+     "signed_by": "1d6807bd42976068d9c8e83d2f335ee030a2e1fb1ad1944b03197068cea6f22b",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_messages",
+      "sign_files",
+      "sign_identity",
+      "encrypt",
+      "authenticate",
+      "manage_claims"
+     ],
+     "content": {
+      "count": 1,
+      "root": "f49f60ef4b6e93005eec7c90686f5a94a5d416b40ca7246af59304adef1d6986"
+     },
+     "device_encryption_pubkey": "45d1ca3d5d830babc47fc25e6b9b8bdf01d27661f75891acf34c1511acacad74",
+     "device_pubkey": "2c03dbd5d67158df866a7ffc1942966391d51216a14cfdf9788a928554ca925d",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "laptop",
+     "prev": "77f972678f8981b52c3455de6499448c07c025554919a7c7886a47edb29cd512",
+     "signature": "3f89bd6e91e50743e8b10044bc0aa5389243fc22363416e83cfe46b17b63a20cb2a94a61bfd5793b9a70109bb4dc33c85cc3334635870130613fddcc25fc8c08",
+     "signed_by": "1d6807bd42976068d9c8e83d2f335ee030a2e1fb1ad1944b03197068cea6f22b",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_messages",
+      "sign_files",
+      "sign_identity",
+      "encrypt",
+      "authenticate",
+      "manage_claims"
+     ],
+     "content": {
+      "count": 1,
+      "root": "0000000000000000000000000000000000000000000000000000000000000000"
+     },
+     "device_encryption_pubkey": "31f3c1b97cb89c762f4dc7c21e7af0e59d0aa0a7787a2f6b8487fd8ffa096724",
+     "device_pubkey": "d8fc6ba233134c3a46b98e8176da3032339b172227c97f9921534456d9fa0bad",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "x",
+     "prev": "c7dbef00905c0e3f3eb92a6e86381e7cd19d7f28578b596a7b5914220819aa16",
+     "signature": "b23d99492cc1f1b97b99a3ae8d23ee6c5eb5c84659bb6c1e7df393a216086c0d91ea595e6fb6dfe820adc95ad1bbe1815e15488b767c226d881f76b3ad865604",
+     "signed_by": "1d6807bd42976068d9c8e83d2f335ee030a2e1fb1ad1944b03197068cea6f22b",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000000",
+     "claim_type": "email",
+     "commitment": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "control_ref": "77f972678f8981b52c3455de6499448c07c025554919a7c7886a47edb29cd512",
+     "expires": null,
+     "hash_alg": "sha256",
+     "prev": null,
+     "seq": 0,
+     "signature": "01bd6bc4c0f55c3fa311d5f1032a41b1915a7d63be1ecdc0bd2f9fddd4dea3e03bcdce242db3ffbd1557dcb692ad40a6e251c9e8f70524ea169da9a629882704",
+     "signed_by": "1d6807bd42976068d9c8e83d2f335ee030a2e1fb1ad1944b03197068cea6f22b",
+     "timestamp": 1793536735,
+     "type": "add_claim",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Event 2: content commitment does not match the content",
+    "valid": false
+   },
+   "name": "wrong-root",
+   "related": {},
+   "why": "a validly signed control event whose content root matches nothing"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "47242a6703954948706a559ad0efa29a8df49ba52326c05c35171d6fdd825c48",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "9f45dd2c4c15feb166fd3569d430dae90d89be3ea155057fca0859288858d7ff",
+     "signature": "a1e720a6a82e21b18f00c03242e991158b6306193c43f744be5872f2b17ce83d594744f4648d2d3e37e70954f5f1f4bd8fbbe54be8cf300fd858774c3de15a0b",
+     "signed_by": "9f45dd2c4c15feb166fd3569d430dae90d89be3ea155057fca0859288858d7ff",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "device_pubkey": "abababababababababababababababababababababababababababababababab",
+     "hash_alg": "sha256",
+     "prev": "af5adaae2bc662f7b0c09273080f8242ca15f72d287098cee1c511b905e65da7",
+     "reason": null,
+     "signature": "741dd40b2015fe9ae915ad3bc7ea82fe50a77c4ad5b2f14658a60d95c662981cf738cc262f65989c43f7d45664651ca5fe0eee6a9152fc0a41e6d0f6d5cc0404",
+     "signed_by": "9f45dd2c4c15feb166fd3569d430dae90d89be3ea155057fca0859288858d7ff",
+     "timestamp": 1793536735,
+     "type": "revoke_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000000",
+     "claim_type": "email",
+     "commitment": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "control_ref": "af5adaae2bc662f7b0c09273080f8242ca15f72d287098cee1c511b905e65da7",
+     "expires": null,
+     "hash_alg": "sha256",
+     "prev": null,
+     "seq": 0,
+     "signature": "eb0b988b03868225fb7a0b7b24eb5ef6cf3567e52350824dc9942f1e27951dd159a043eba1e1dd022b0ba292c685e62ebedaaa13dde28aea9a57dd803b04c405",
+     "signed_by": "9f45dd2c4c15feb166fd3569d430dae90d89be3ea155057fca0859288858d7ff",
+     "timestamp": 1793536735,
+     "type": "add_claim",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Content event 0: not committed by the control event that follows its control_ref",
+    "valid": false
+   },
+   "name": "uncommitted-content",
+   "related": {},
+   "why": "content exists and a control event does not commit it"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "a0b7d14b58c005ec52491d52d98f1c3568e6c832263c188c2d6a08e9d4f25d6c",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "292fbf0fc8544231f33c6b03fbc3f084044e792b8053f9b1583babc422e800b0",
+     "signature": "130389fd586820772b8c560043287bd2251faba2cb952c21d13c815db51fa658d571c95b839a8dfd3955f4d488a926ae4c08e729dceeff413a382a76a8675504",
+     "signed_by": "292fbf0fc8544231f33c6b03fbc3f084044e792b8053f9b1583babc422e800b0",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "manage_claims"
+     ],
+     "device_encryption_pubkey": "80de13b0a95a10093a14ac93d33f52326dfe4b39658a32adf5001cdfdd0df25b",
+     "device_pubkey": "6609cc38ae32e40b0934daff0367e038a2e9cff0eea7b9f4c2eb5142edabb1b7",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "thief",
+     "prev": "040e728cb1b7e0ac4f07ec3b822f4772facd36210761b856a2ee610ac664dd4b",
+     "signature": "5bf72c264e7d5ae13deae2fdfaba9390c49226158a6a57577c0c801994e4ec5773f5cd406b556d877e86067ff54131b11256b14853fb022b3c71fb4abbbb0907",
+     "signed_by": "292fbf0fc8544231f33c6b03fbc3f084044e792b8053f9b1583babc422e800b0",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "device_pubkey": "6609cc38ae32e40b0934daff0367e038a2e9cff0eea7b9f4c2eb5142edabb1b7",
+     "hash_alg": "sha256",
+     "prev": "4759e7fc5e9b27dded3c0082340813c130553f801003f549da5729b426beb31c",
+     "reason": "lost",
+     "signature": "190d6932e98d0ddc6f0151c6e5050682a33a3edef9f65bad3dc382d53660801dcb6b17e4395e977864199d798dd8fa6705572c4e94f07f519b0a432d34690f02",
+     "signed_by": "292fbf0fc8544231f33c6b03fbc3f084044e792b8053f9b1583babc422e800b0",
+     "timestamp": 1793536735,
+     "type": "revoke_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "claim_id": "claim-id-0000000009",
+     "claim_type": "email",
+     "commitment": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "control_ref": "4759e7fc5e9b27dded3c0082340813c130553f801003f549da5729b426beb31c",
+     "expires": null,
+     "hash_alg": "sha256",
+     "prev": null,
+     "seq": 0,
+     "signature": "74faff89eaea4e28c098c0207cf5799fa0ccb0fba295d795656f8088258441a0bcc56a919a6e0aece468c6cd873a6fbe445b1d336e4b3294e9bad4af29b0b20c",
+     "signed_by": "6609cc38ae32e40b0934daff0367e038a2e9cff0eea7b9f4c2eb5142edabb1b7",
+     "timestamp": 1793536735,
+     "type": "add_claim",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Content event 0: not committed by the control event that follows its control_ref",
+    "valid": false
+   },
+   "name": "backdated-by-revoked-device",
+   "related": {},
+   "why": "a revoked device signs content under a control_ref from before its revocation"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "a8b3d82558c5adfc2f27325cfeace6133e8aeaf92df14e8702e8c25d7b57fb01",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+     "signature": "3c5b0e536909a61659603645026d44dd9579703a38425010a286e2d1c08994792888d2c39148d5bae40268920b38b6096e6dc9e282ac2d53e7d4657d042ae60d",
+     "signed_by": "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "91001f0838c9726bcc43ec44dce6b4586bb601141d78d7112d933730cf82ba79",
+     "device_pubkey": "3dab06dd00e816f7235c4b3e28cdc22bafb7f963be17be786ed0d66d7644ee23",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "one",
+     "prev": "198fda401c43d9abb9e28c7e182ff62db3b474fcb915183e89883368551ba4c6",
+     "signature": "14458a6000df8a364301cf7f6351926abfa4f4b05996fcbc981b50342d9cd5cec26507055397ad9f77b96e6ff4e51c88778eabe44b40e65821e24774fec76f01",
+     "signed_by": "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "8207573cf8bcb56d76a3186c8589063e2cbe92ef2afa80b37aa3af3f1f62430b",
+     "device_pubkey": "7f443ae3fbb979e21378917e8bc12ddde73764716f5b8a81684a9d32a1a6d3ae",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "two",
+     "prev": "cc18ddf2359e27dde734f8d5ae878e7e4ca64acbe679053ca8a9eac55084a6c1",
+     "signature": "e2fd617c71f4aeb037ae617b166313dff4801ffd9651ba6f9ae471abeabcf4001c9b872352445e2d754607ff4291a7e944708024c3ea702d72a8bb7473422809",
+     "signed_by": "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "device_pubkey": "3dab06dd00e816f7235c4b3e28cdc22bafb7f963be17be786ed0d66d7644ee23",
+     "hash_alg": "sha256",
+     "prev": "99f471eecbbf539b30f3dc6d850ca194015c8e4938e11704b52e3aabad7687ab",
+     "reason": "stolen",
+     "signature": "baf70741ef6f4e0df75f13a8cd6137b1964fe2c04b2d93c53895a43b2312777dc8e78c0e5d94c88753e3fd71e9e07043487da4a560dffed4c3114313e424850d",
+     "signed_by": "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+     "timestamp": 1793536735,
+     "type": "revoke_device",
+     "untrusted_since": 1793535735,
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+     "7f443ae3fbb979e21378917e8bc12ddde73764716f5b8a81684a9d32a1a6d3ae"
+    ],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 4,
+    "device_status": {
+     "3dab06dd00e816f7235c4b3e28cdc22bafb7f963be17be786ed0d66d7644ee23": {
+      "capabilities": [
+       "sign_identity"
+      ],
+      "expires": null,
+      "known": true,
+      "revoked": true,
+      "untrusted_since": 1793535735
+     },
+     "7f443ae3fbb979e21378917e8bc12ddde73764716f5b8a81684a9d32a1a6d3ae": {
+      "capabilities": [
+       "sign_identity"
+      ],
+      "expires": null,
+      "known": true,
+      "revoked": false,
+      "untrusted_since": null
+     }
+    },
+    "head": "154edbc7464136223ac845c753a62609418704a5acd3bc882effa6816621bffd",
+    "identity": "198fda401c43d9abb9e28c7e182ff62db3b474fcb915183e89883368551ba4c6",
+    "master": "09040e2ea3f28f59776a4fee090dd030447ba136690742074f506967c190aa96",
+    "partial": false,
+    "valid": true
+   },
+   "name": "revoke-with-untrusted-since",
+   "related": {},
+   "why": "a device revoked with a time from which it is untrusted"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "b8deb7c037c57e1954e0d74cc574bf703076462fb541574258053f5301f77813",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "1c6df3248882f1d081a8a02eb7a1fb59cdc9ff873116567577d6cf0b00896521",
+     "signature": "2a245645ccc181c7c65792277b58a94fb5e6213a02fdec56defb4ce68dd410fb8bfee5998316e2f5d5a83e7e7a4e88f4051d1ba32954c2a2d3c4c16bc3f8f807",
+     "signed_by": "1c6df3248882f1d081a8a02eb7a1fb59cdc9ff873116567577d6cf0b00896521",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "a9fc9124d276c00b1d28fda4fce734a4fabe2850cfbc7e605613ad96544c145b",
+     "device_pubkey": "e6be92a1286c22e314ff74da82a7fb11c7ab36929d8200a7607c156eb367b13f",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "a",
+     "prev": "fe994204cb0bc9e44619f6e48bc8c7e70dd7a5517d7f93958de23b9c2a33aaa0",
+     "signature": "afaacb4e6342ba77d8e25ccdfc04c031f3e47b2d2915c8ecc3bdc0f535bcebb1221777e7af0381f67653666b48917fe042b22daed4f373584ea040e125d6da06",
+     "signed_by": "1c6df3248882f1d081a8a02eb7a1fb59cdc9ff873116567577d6cf0b00896521",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "f00a3ce2a4794631bc21847f5cc42e18d0b7b90fb1bf0028f40e6f90e11fc82d",
+     "new_pubkey": "a5884e1484765247cf21b0cc5bcccd4f38fa30f038baea7c3194e9a271dfb59b",
+     "prev": "6bf2cb02abd21e6d1ff9692395074a3e1230637303408cef5689d863f972384f",
+     "revoke_devices": "all",
+     "signature": "c17a949a5ef4943bd81b781c1223084e215b29fd77e53a6e2e1f7d9bfb8f926260025863883d75fb2b1b7b144baf7569e49ee8db2419561edec4b3bf158ca907",
+     "signed_by": "1c6df3248882f1d081a8a02eb7a1fb59cdc9ff873116567577d6cf0b00896521",
+     "timestamp": 1793536735,
+     "type": "rotate_master",
+     "untrusted_since": 1793536235,
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 3,
+    "device_status": {
+     "e6be92a1286c22e314ff74da82a7fb11c7ab36929d8200a7607c156eb367b13f": {
+      "capabilities": [
+       "sign_identity"
+      ],
+      "expires": null,
+      "known": true,
+      "revoked": true,
+      "untrusted_since": 1793536235
+     }
+    },
+    "head": "b19f37d374c56f6ad130c2d053442ec12634e39345b041d0a3b85abb8eefe73a",
+    "identity": "fe994204cb0bc9e44619f6e48bc8c7e70dd7a5517d7f93958de23b9c2a33aaa0",
+    "master": "a5884e1484765247cf21b0cc5bcccd4f38fa30f038baea7c3194e9a271dfb59b",
+    "partial": false,
+    "valid": true
+   },
+   "name": "rotation-revokes-all",
+   "related": {},
+   "why": "a master rotation that also revokes every device, from a time"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "f4709901cdc9b6a0efa61c672b41efc732677b34d9d3b16fd76c41c6e8848822",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "Alice",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "8237c2c85e7f11144358d92c4c098351c648408f93d31c3de2aaa4f28741b470",
+     "signature": "bea41ab246f39a2337994ee29e48c8476e4d7426e25be314dc6cef14b6e4173fdad057b59484c4d1e060e8f921070c9eb0923389c9855466914d4e378da8a609",
+     "signed_by": "8237c2c85e7f11144358d92c4c098351c648408f93d31c3de2aaa4f28741b470",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "127f86d8b647b6df8042e3140c9497da28a36b0cf5df31235055a5db351f1241",
+     "new_pubkey": "b595fd861dead3a12a6136059c87f97b95907956d2f28b7040104393260fc8d4",
+     "prev": "a1eaa426361c420f3c581744ae2f7c466b9e060e4b1e872c338bed5116a6e0b5",
+     "revoke_devices": "everything",
+     "signature": "7182fc574f634d1d1c642239d0ed67bdbca94a46f94071557feb34f237e8f68aaef692c7698e61d6613c0d62d1e82995d9fdc2bd7c996f41e1ce7cfcbd92f105",
+     "signed_by": "8237c2c85e7f11144358d92c4c098351c648408f93d31c3de2aaa4f28741b470",
+     "timestamp": 1793536735,
+     "type": "rotate_master",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Event 1: revoke_devices is \"all\" or a list of device keys",
+    "valid": false
+   },
+   "name": "bad-revoke-field",
+   "related": {},
+   "why": "revoke_devices that is neither \"all\" nor a list of device keys"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "43a87a2c4594c84eedff66e4b108f607ff75ecf4ce4bb344cb783913e0296d8ffb4e08fefdfe263b14d2b3e36d2924703ff72af28f635580d57e9f50536df000",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "1193c08ab0392830eb4b073c01c83c93bc0c8492247de91ea2d5d2ed77c08609",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 100
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "signature": "62bce2f8533034ccb896c642a3d4ba1b1dc4aa5a24b6066af553916bbd7274c9e8c8b6770a09728ec0081cbde7b428fd9feb6b937713f42b7bc6566ca51d2204",
+     "signed_by": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "1263b0ecdd63b5430288b7bef48b121c9b9587c3fc312359b4f66d0a80f6f205",
+     "device_pubkey": "6014c36e4151b72294cbe2ee2126202925fd6b5766dfabb088f54ef004e02fea",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "signer",
+     "prev": "a2049e64dc175268f3e25fe19b5d4f70afcc97e1dfa6fec06970d4f48826bd72",
+     "signature": "20c08c19eed7d7debbef700c53818fe594740e27abb0ae50cacdedb8f859b55f0f506645aa08ab191feeef7d316d0db783fbd83de2a05037490f84f012c76c00",
+     "signed_by": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "6014c36e4151b72294cbe2ee2126202925fd6b5766dfabb088f54ef004e02fea"
+    ],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 2,
+    "head": "0deff23457c4c7f79531bd89a5ad4f38a2b9038a96033d91f7bd67259672f7d9",
+    "identity": "a2049e64dc175268f3e25fe19b5d4f70afcc97e1dfa6fec06970d4f48826bd72",
+    "master": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+    "partial": false,
+    "valid": true
+   },
+   "name": "org-self-run",
+   "related": {
+    "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "2f216449bda7adabd8baf514fee975f4737df7de0f6d63716c8d2e00a793ab58",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "owner",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "signature": "35f9a5ab8c8d25f9a54e8116826e301c8b067855ae0a843455fec5564e37293f0f3e2276ae913978f7366edd6ecc2a5458a572741d48baa868525b40a941f70a",
+      "signed_by": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "an organization owned by one identity, running itself with its own key"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "43a87a2c4594c84eedff66e4b108f607ff75ecf4ce4bb344cb783913e0296d8ffb4e08fefdfe263b14d2b3e36d2924703ff72af28f635580d57e9f50536df000",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "1193c08ab0392830eb4b073c01c83c93bc0c8492247de91ea2d5d2ed77c08609",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 100
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "signature": "62bce2f8533034ccb896c642a3d4ba1b1dc4aa5a24b6066af553916bbd7274c9e8c8b6770a09728ec0081cbde7b428fd9feb6b937713f42b7bc6566ca51d2204",
+     "signed_by": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "1263b0ecdd63b5430288b7bef48b121c9b9587c3fc312359b4f66d0a80f6f205",
+     "device_pubkey": "6014c36e4151b72294cbe2ee2126202925fd6b5766dfabb088f54ef004e02fea",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "signer",
+     "prev": "a2049e64dc175268f3e25fe19b5d4f70afcc97e1dfa6fec06970d4f48826bd72",
+     "signature": "20c08c19eed7d7debbef700c53818fe594740e27abb0ae50cacdedb8f859b55f0f506645aa08ab191feeef7d316d0db783fbd83de2a05037490f84f012c76c00",
+     "signed_by": "0adf7b51bcd80d371343d4b7b8446d2403e834150115e21d2d46423a911f27e9",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Genesis: unknown owner identity 942b9ed5f8ba",
+    "valid": false
+   },
+   "name": "org-needs-owner-chains",
+   "related": {},
+   "why": "the same organization cannot be checked without the owners' chains"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "32d0bb5fd58de2f305e5b3640218ab7e1f4afa2462aeaa2399ccae15bb122109077cda653339009eb8149aeb5951dbe2c05194ff5748c9e8ccf7da8ae19c210b",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "cc2c8083b06331fca25594e9af99dd6c0c37339a21ecb1277cab96d32bfab001",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 60
+      },
+      {
+       "identity": "069b5a24464c3fa432186c59c1fc3a39b2bec904269ef530e56fb30bc7f513c8",
+       "weight": 40
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "6bc1b378add3cd2d4eaca96ea7fa5be1c4783e5f0f5b17a601b74a8fadf9d3d7",
+     "signature": "ce8c90e0f257c20a84549eef6f058856701b41857c9ffba6adca432987d0a24b5bbd4c2f1fae97fa88553f495777c22f63f9d84185888f513d83d7db2c0a9a00",
+     "signed_by": "6bc1b378add3cd2d4eaca96ea7fa5be1c4783e5f0f5b17a601b74a8fadf9d3d7",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Genesis: every founding owner must approve",
+    "valid": false
+   },
+   "name": "org-founding-needs-everyone",
+   "related": {
+    "069b5a24464c3fa432186c59c1fc3a39b2bec904269ef530e56fb30bc7f513c8": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "f9c10cc30680f9f9ee75a8f9c081e90cbd9da98ef8f2d07f24efc797d74da674",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "other",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "03ea670941a7c371c48b6627bc049ec7869d11f62e982e2d4e29ea6010e5775e",
+      "signature": "859453c438269660094bdcb16b825bc4b9c6daffb520c9fa7bde727b866c166bf9c7b5fda2acbc07e1faefb3b7a8cd4f2ffce0771794fc619d131b5f5cc7b503",
+      "signed_by": "03ea670941a7c371c48b6627bc049ec7869d11f62e982e2d4e29ea6010e5775e",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ],
+    "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "2f216449bda7adabd8baf514fee975f4737df7de0f6d63716c8d2e00a793ab58",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "owner",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "signature": "35f9a5ab8c8d25f9a54e8116826e301c8b067855ae0a843455fec5564e37293f0f3e2276ae913978f7366edd6ecc2a5458a572741d48baa868525b40a941f70a",
+      "signed_by": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "a founding approval missing one owner"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "bac98cd915429c150d56deec33eb5672a7dfbdd2cc3e59af36418fe658af69acfdb77df81a5786119ef42f7b6337fa36821f550b38f79c2c194d15d18ffda509",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "2592bac22951358746651f4a4166573e2554879c58910729fc85ec807b0dd958",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 100
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "6cd6caf88432830448c0ce76068aeefbc5adb55fa93b7bff49b7125982ec5710",
+     "signature": "52b52e80ed61d96ec333d155734d1e53151bd175a799334976ec9d49ef7c065d596b7aa7dd291b9cd6c27016015f8457c59ba96807c64484c2426830fc34730a",
+     "signed_by": "6cd6caf88432830448c0ce76068aeefbc5adb55fa93b7bff49b7125982ec5710",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "8f821f86a584c8e89bbd1b95bd46fff295274925548a7a1ee08572ddd27e381f",
+     "device_pubkey": "d1d86ef848bc512a1d2ca764c3b96cce36fd8d203168462a2e35fc2078f3ea5d",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "signer",
+     "prev": "68704f988b15189aefc83fb3a8a68c6c2b2c99ad228b90dea763f7e2ad633563",
+     "signature": "7bf819609d0f18f8786a6586341955d553eda08c6850cec907b01c9aa9bd2d40c32bb8eb933c180229494a2d0dcca3412fb62d1b5c1fb910dbfee23a5a7b0501",
+     "signed_by": "6cd6caf88432830448c0ce76068aeefbc5adb55fa93b7bff49b7125982ec5710",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "d2bf8463b2e26e90008e8f2144fd734d35317dcedf0e5c22eb7d8352fcf2c9ed3d0704f1ca3ea64825105b12a1dcb3b8c664e6fdd8eb74aeffcc6cee6a6d4107",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "c648fa025de85be5201631e9888141649859e19bab0d230a4e6a5ac7bfac527c",
+     "new_pubkey": "03b90804c5c8c03ad175068c225911ab7985f3bb0fcb17042704f1419341aaa3",
+     "prev": "c8099a36eacb8b6d7bccbc28c6899a4d17d693ebe7d00c10c12c52da6df13041",
+     "revoke_devices": "all",
+     "signature": "",
+     "signed_by": "owners",
+     "timestamp": 1793536735,
+     "type": "rotate_master",
+     "untrusted_since": 1793536635,
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 3,
+    "device_status": {
+     "d1d86ef848bc512a1d2ca764c3b96cce36fd8d203168462a2e35fc2078f3ea5d": {
+      "capabilities": [
+       "sign_identity"
+      ],
+      "expires": null,
+      "known": true,
+      "revoked": true,
+      "untrusted_since": 1793536635
+     }
+    },
+    "head": "55f0fb91e54fd2edd1833b6d09970e9dc14088d793efa3cc831d90872875a742",
+    "identity": "68704f988b15189aefc83fb3a8a68c6c2b2c99ad228b90dea763f7e2ad633563",
+    "master": "03b90804c5c8c03ad175068c225911ab7985f3bb0fcb17042704f1419341aaa3",
+    "partial": false,
+    "valid": true
+   },
+   "name": "org-governed-replacement",
+   "related": {
+    "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "2f216449bda7adabd8baf514fee975f4737df7de0f6d63716c8d2e00a793ab58",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "owner",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "signature": "35f9a5ab8c8d25f9a54e8116826e301c8b067855ae0a843455fec5564e37293f0f3e2276ae913978f7366edd6ecc2a5458a572741d48baa868525b40a941f70a",
+      "signed_by": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "the owners replace the organization's key and revoke all its devices in one event"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "bac98cd915429c150d56deec33eb5672a7dfbdd2cc3e59af36418fe658af69acfdb77df81a5786119ef42f7b6337fa36821f550b38f79c2c194d15d18ffda509",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "2592bac22951358746651f4a4166573e2554879c58910729fc85ec807b0dd958",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 100
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "6cd6caf88432830448c0ce76068aeefbc5adb55fa93b7bff49b7125982ec5710",
+     "signature": "52b52e80ed61d96ec333d155734d1e53151bd175a799334976ec9d49ef7c065d596b7aa7dd291b9cd6c27016015f8457c59ba96807c64484c2426830fc34730a",
+     "signed_by": "6cd6caf88432830448c0ce76068aeefbc5adb55fa93b7bff49b7125982ec5710",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "8f821f86a584c8e89bbd1b95bd46fff295274925548a7a1ee08572ddd27e381f",
+     "device_pubkey": "d1d86ef848bc512a1d2ca764c3b96cce36fd8d203168462a2e35fc2078f3ea5d",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "signer",
+     "prev": "68704f988b15189aefc83fb3a8a68c6c2b2c99ad228b90dea763f7e2ad633563",
+     "signature": "7bf819609d0f18f8786a6586341955d553eda08c6850cec907b01c9aa9bd2d40c32bb8eb933c180229494a2d0dcca3412fb62d1b5c1fb910dbfee23a5a7b0501",
+     "signed_by": "6cd6caf88432830448c0ce76068aeefbc5adb55fa93b7bff49b7125982ec5710",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "approvals": [],
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "c648fa025de85be5201631e9888141649859e19bab0d230a4e6a5ac7bfac527c",
+     "new_pubkey": "03b90804c5c8c03ad175068c225911ab7985f3bb0fcb17042704f1419341aaa3",
+     "prev": "c8099a36eacb8b6d7bccbc28c6899a4d17d693ebe7d00c10c12c52da6df13041",
+     "signature": "",
+     "signed_by": "owners",
+     "timestamp": 1793536735,
+     "type": "rotate_master",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Event 2: owners approve 0 of 100, which is not over half",
+    "valid": false
+   },
+   "name": "org-governed-without-approval",
+   "related": {
+    "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "2f216449bda7adabd8baf514fee975f4737df7de0f6d63716c8d2e00a793ab58",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "owner",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "signature": "35f9a5ab8c8d25f9a54e8116826e301c8b067855ae0a843455fec5564e37293f0f3e2276ae913978f7366edd6ecc2a5458a572741d48baa868525b40a941f70a",
+      "signed_by": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "a governed rotation with no owner approval"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "d0f4dd117207424a7a065bbae899025223ec7593b9c84002d296ae6e942664be1b450ae5e5e381c6892a05e9afd7d716eb26a573d4628ee6c051cfdb97dba804",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "d518b7eeb1c00d89dbfbd6b16fe9cfceb34d51d6c1a16a75492c216488827049",
+     "ephemeral": false,
+     "governance": "managed",
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 100
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "5a05e24ed30fb69dc5c12e433a0ed386d68788ebae6d1a24ffeda04b378421e0",
+     "signature": "06c1c224f73064924dfb74d38ba263be0b7d8dbbcbd6a6b03bee8605dcad6a28f5a8aeb1b4d8c8b0b566e8912c18f73e4db589fe5dfc4032b868006d888dca0b",
+     "signed_by": "5a05e24ed30fb69dc5c12e433a0ed386d68788ebae6d1a24ffeda04b378421e0",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "f352c431b8adc8e98dd76771e04f7f2509b210748088dd1f332211cce8188906",
+     "device_pubkey": "88f104c8d8e4b4296d40ad6894797592b93caedc2f9e9b91c27cae46acd36e62",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "signer",
+     "prev": "54c37fd5de56627fb41843b59cb8de8a6562dc4e57efa0fc9f19d7663632d8d9",
+     "signature": "461aabebca5cc8b0e59130e6cecb054fc8057dcac2d60327513fdd83e4d9a31c2a1fefbbf3ea1a7a1b8d64795a0546118d1898ed709832d1d5c0c7cc55e09c0e",
+     "signed_by": "5a05e24ed30fb69dc5c12e433a0ed386d68788ebae6d1a24ffeda04b378421e0",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Event 1: an organization's add_device is decided by its owners",
+    "valid": false
+   },
+   "name": "org-managed-device-by-org-key",
+   "related": {
+    "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "2f216449bda7adabd8baf514fee975f4737df7de0f6d63716c8d2e00a793ab58",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "owner",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "signature": "35f9a5ab8c8d25f9a54e8116826e301c8b067855ae0a843455fec5564e37293f0f3e2276ae913978f7366edd6ecc2a5458a572741d48baa868525b40a941f70a",
+      "signed_by": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "in a managed organization the organization's own key may not add a device"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "d5a68a6b68b9cdbb865bd52f5e6c15c571a66ab2233c5425ef71c6da4f5200fa68200cc82a38b3ba3393383f9fea7ed19ce9c9a8ab9b0028050fd081ff087702",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "distribution_points": null,
+     "encryption_pubkey": "41a3dd7491ec84dffec49912f2ecdd5ed3e6aa4ad8ed090ad9888d79805ab56e",
+     "ephemeral": false,
+     "governance": "managed",
+     "hash_alg": "sha256",
+     "identity_type": "organization",
+     "name": "org",
+     "owners": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "weight": 100
+      }
+     ],
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "b474d4e37dc1b3f2a6848dcc4fe38de5b495914c65b4da15cc9d279f6c3ba80c",
+     "signature": "ac956a1e298674795046b830480603a1572bf5fa34f98a8c83b137bf770c55fe041b0c3695586a2ca7864afb7f4c4ee38e7a97586b09e7995e1a3fe43ca5d50d",
+     "signed_by": "b474d4e37dc1b3f2a6848dcc4fe38de5b495914c65b4da15cc9d279f6c3ba80c",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "approvals": [
+      {
+       "identity": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4",
+       "key": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+       "signature": "490af298dfd89613d035613c28603fae529e89582dbd459be8339d2a22d67f5f7e6dc1738c525fc90908ee523e2f62105b6742f8fd574be8f1c974403c596c04",
+       "state": "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4"
+      }
+     ],
+     "capabilities": [
+      "sign_identity"
+     ],
+     "device_encryption_pubkey": "8f821f86a584c8e89bbd1b95bd46fff295274925548a7a1ee08572ddd27e381f",
+     "device_pubkey": "d1d86ef848bc512a1d2ca764c3b96cce36fd8d203168462a2e35fc2078f3ea5d",
+     "expires": null,
+     "hash_alg": "sha256",
+     "label": "signer",
+     "prev": "3311dfb7f66661bfadbe238a86b1bc6151be9bc03b8228969eec455d8798e5f9",
+     "signature": "",
+     "signed_by": "owners",
+     "timestamp": 1793536735,
+     "type": "add_device",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "b474d4e37dc1b3f2a6848dcc4fe38de5b495914c65b4da15cc9d279f6c3ba80c",
+     "d1d86ef848bc512a1d2ca764c3b96cce36fd8d203168462a2e35fc2078f3ea5d"
+    ],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 2,
+    "device_status": {
+     "d1d86ef848bc512a1d2ca764c3b96cce36fd8d203168462a2e35fc2078f3ea5d": {
+      "capabilities": [
+       "sign_identity"
+      ],
+      "expires": null,
+      "known": true,
+      "revoked": false,
+      "untrusted_since": null
+     }
+    },
+    "head": "bcf1bbc51beab613712281ab4b6a048d4b1150745004a9ba7aec735563f13cef",
+    "identity": "3311dfb7f66661bfadbe238a86b1bc6151be9bc03b8228969eec455d8798e5f9",
+    "master": "b474d4e37dc1b3f2a6848dcc4fe38de5b495914c65b4da15cc9d279f6c3ba80c",
+    "partial": false,
+    "valid": true
+   },
+   "name": "org-managed-device-by-owners",
+   "related": {
+    "942b9ed5f8bab5528595e7e719f71aa1ca4f22e0e6bc56b2729bfe77905505d4": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "2f216449bda7adabd8baf514fee975f4737df7de0f6d63716c8d2e00a793ab58",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "owner",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "signature": "35f9a5ab8c8d25f9a54e8116826e301c8b067855ae0a843455fec5564e37293f0f3e2276ae913978f7366edd6ecc2a5458a572741d48baa868525b40a941f70a",
+      "signed_by": "47b3e6710fb3572166b7baf2a24e22ab6e62616d5466e493c4ca9f862a5cbedb",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "in a managed organization the owners add the device"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "61d1e196ed268fcb825c54b9c61c4c80a2ce9ab26fc19cfe24469acb7c0a9505",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "victim",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "signature": "a686e35c450530fcc68573c4dc84d87bea2b35974f7517c96dfad77bb7720cb2acebfee8401135462dc1daba72ea4395fcd51933eacc4d94f56ab6ac0a575e0d",
+     "signed_by": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "backup_activates_after": null,
+     "backup_threshold": null,
+     "backup_trustees": null,
+     "hash_alg": "sha256",
+     "prev": "2a7c54e21feb8e29bd123c0234d60d3e92cd13ef41bfb1d13f7d73bd217a119c",
+     "primary_threshold": 2,
+     "primary_trustees": [
+      "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974",
+      "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22",
+      "2e8c2025a1a3276def1e3ccf56a5c2c9074c72253f9bcb82ad1dd5476a98a9e0"
+     ],
+     "signature": "6746165d0cb3f887876b70a6b704845684cd338415247481da2d8e3b77c745be1fbb869c13266cb17b53e31c1155e532728f3762653ba20a80b69b4cf6f9270e",
+     "signed_by": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "timestamp": 1793536735,
+     "type": "set_recovery",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "2e36633e999679cce0539a2082f3b64fdc99f88c8f153a063e6544210db67438",
+     "new_pubkey": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+     "prev": "ca3da486c5ce9ed69842db2cd104a6330973028d451a2eeb12e51dcfc6f9ac07",
+     "recovery_signatures": [
+      {
+       "key": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+       "signature": "3362e7356baf2f1d334ffe1da7a2ce29e834c757400f97111995682ffcd8de8dd15df0cf6bcb1acaa681cc6b2f47ddf5b3d20d4fd8b4e1d3eb03aac1be8af407",
+       "state": "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974",
+       "trustee_identity": "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974"
+      },
+      {
+       "key": "cba353a80840b8fbbc30ea77ea2cfa7b38a90d174a5238d8324f9a1e171ab127",
+       "signature": "dd7c654b00343cbcfdbdd07184710f1db13abb956939753f42139d5941f8cf9834ef3ee05cd04bb3926d8d6feb0125fb6d129724473a464cca81777086f03c02",
+       "state": "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22",
+       "trustee_identity": "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22"
+      }
+     ],
+     "signature": "9618afff98bb178261865f94fbb4a15283ca3e291137589382c8f2a354fce496d722b7cd4194d843148e929fc4da607ecab73a0c7142e230c16d267960874903",
+     "signed_by": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+     "timestamp": 1793536735,
+     "type": "social_recovery",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "active_devices": [
+     "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98"
+    ],
+    "claims": [],
+    "content_length": 0,
+    "control_length": 3,
+    "head": "635436c6436f913288d73c45013230b3ed4c5b8fce05d636b4e5806c472591bd",
+    "identity": "2a7c54e21feb8e29bd123c0234d60d3e92cd13ef41bfb1d13f7d73bd217a119c",
+    "master": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+    "partial": false,
+    "valid": true
+   },
+   "name": "recovery-enough",
+   "related": {
+    "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "effccb2d96c838efa0eb18c5cd5e992726b06665195c74611a92795b35eb4261",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "t0",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+      "signature": "8a3c7c67121162a0ee50f522b3fe67ca1ecd2f06c9c801b042ad8cbb22f98920c3c027874f3edf7caf7ff8934b681b9258044834b0947c2d0700a41ee24aaf0d",
+      "signed_by": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ],
+    "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "76d4cce2bae5a50926651844550953a70bf8a994f30b537ce68ce5b9e7385d2f",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "t1",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "cba353a80840b8fbbc30ea77ea2cfa7b38a90d174a5238d8324f9a1e171ab127",
+      "signature": "502dd6663df1bfc794a10f86370548745a2bf0ad649075c1fae0a0cc5e27fb85a11b9c2d23ca96d1e8438d9f291e3bbcc219e8577004efb8f156a8ac6205f309",
+      "signed_by": "cba353a80840b8fbbc30ea77ea2cfa7b38a90d174a5238d8324f9a1e171ab127",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ],
+    "2e8c2025a1a3276def1e3ccf56a5c2c9074c72253f9bcb82ad1dd5476a98a9e0": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "913de204b1f61181d7cc6dfa65b3d35fd216b9fc0750a16cb1fd111b01d38c35",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "t2",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "83bc6cda7d3f73834eae9497ac963b0c210551049f7663a74aaf2f73c8c33149",
+      "signature": "e1caca799191986f1eb79dec3ab97b21c1a84b01b31a73337ee8bbeae5629cab0b4161ff93dbcb973acac454413220254e2471e38248263974ba66ca62285e08",
+      "signed_by": "83bc6cda7d3f73834eae9497ac963b0c210551049f7663a74aaf2f73c8c33149",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "two of three trustees restore the identity to a new key"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "61d1e196ed268fcb825c54b9c61c4c80a2ce9ab26fc19cfe24469acb7c0a9505",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "victim",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "signature": "a686e35c450530fcc68573c4dc84d87bea2b35974f7517c96dfad77bb7720cb2acebfee8401135462dc1daba72ea4395fcd51933eacc4d94f56ab6ac0a575e0d",
+     "signed_by": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "backup_activates_after": null,
+     "backup_threshold": null,
+     "backup_trustees": null,
+     "hash_alg": "sha256",
+     "prev": "2a7c54e21feb8e29bd123c0234d60d3e92cd13ef41bfb1d13f7d73bd217a119c",
+     "primary_threshold": 2,
+     "primary_trustees": [
+      "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974",
+      "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22",
+      "2e8c2025a1a3276def1e3ccf56a5c2c9074c72253f9bcb82ad1dd5476a98a9e0"
+     ],
+     "signature": "6746165d0cb3f887876b70a6b704845684cd338415247481da2d8e3b77c745be1fbb869c13266cb17b53e31c1155e532728f3762653ba20a80b69b4cf6f9270e",
+     "signed_by": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "timestamp": 1793536735,
+     "type": "set_recovery",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "2e36633e999679cce0539a2082f3b64fdc99f88c8f153a063e6544210db67438",
+     "new_pubkey": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+     "prev": "ca3da486c5ce9ed69842db2cd104a6330973028d451a2eeb12e51dcfc6f9ac07",
+     "recovery_signatures": [
+      {
+       "key": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+       "signature": "3362e7356baf2f1d334ffe1da7a2ce29e834c757400f97111995682ffcd8de8dd15df0cf6bcb1acaa681cc6b2f47ddf5b3d20d4fd8b4e1d3eb03aac1be8af407",
+       "state": "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974",
+       "trustee_identity": "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974"
+      }
+     ],
+     "signature": "5fda31f43b61fe054d088fd0e9459a4da75a4ddee12b30e711bb4a00a42779c4b601291a867eb317f09ef0c62a2c156a635cf1b446750435b0cf2bdeb7a5fe06",
+     "signed_by": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+     "timestamp": 1793536735,
+     "type": "social_recovery",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Event 2: 1 of 2 trustees signed",
+    "valid": false
+   },
+   "name": "recovery-too-few",
+   "related": {
+    "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "effccb2d96c838efa0eb18c5cd5e992726b06665195c74611a92795b35eb4261",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "t0",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+      "signature": "8a3c7c67121162a0ee50f522b3fe67ca1ecd2f06c9c801b042ad8cbb22f98920c3c027874f3edf7caf7ff8934b681b9258044834b0947c2d0700a41ee24aaf0d",
+      "signed_by": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ],
+    "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "76d4cce2bae5a50926651844550953a70bf8a994f30b537ce68ce5b9e7385d2f",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "t1",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "cba353a80840b8fbbc30ea77ea2cfa7b38a90d174a5238d8324f9a1e171ab127",
+      "signature": "502dd6663df1bfc794a10f86370548745a2bf0ad649075c1fae0a0cc5e27fb85a11b9c2d23ca96d1e8438d9f291e3bbcc219e8577004efb8f156a8ac6205f309",
+      "signed_by": "cba353a80840b8fbbc30ea77ea2cfa7b38a90d174a5238d8324f9a1e171ab127",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ],
+    "2e8c2025a1a3276def1e3ccf56a5c2c9074c72253f9bcb82ad1dd5476a98a9e0": [
+     {
+      "alg": "ed25519",
+      "distribution_points": null,
+      "encryption_pubkey": "913de204b1f61181d7cc6dfa65b3d35fd216b9fc0750a16cb1fd111b01d38c35",
+      "ephemeral": false,
+      "hash_alg": "sha256",
+      "identity_type": "personal",
+      "name": "t2",
+      "ownership_proof": null,
+      "prev": null,
+      "pubkey": "83bc6cda7d3f73834eae9497ac963b0c210551049f7663a74aaf2f73c8c33149",
+      "signature": "e1caca799191986f1eb79dec3ab97b21c1a84b01b31a73337ee8bbeae5629cab0b4161ff93dbcb973acac454413220254e2471e38248263974ba66ca62285e08",
+      "signed_by": "83bc6cda7d3f73834eae9497ac963b0c210551049f7663a74aaf2f73c8c33149",
+      "timestamp": 1793536735,
+      "type": "genesis",
+      "version": 1
+     }
+    ]
+   },
+   "why": "one of three trustees is not enough"
+  },
+  {
+   "chain": [
+    {
+     "alg": "ed25519",
+     "distribution_points": null,
+     "encryption_pubkey": "61d1e196ed268fcb825c54b9c61c4c80a2ce9ab26fc19cfe24469acb7c0a9505",
+     "ephemeral": false,
+     "hash_alg": "sha256",
+     "identity_type": "personal",
+     "name": "victim",
+     "ownership_proof": null,
+     "prev": null,
+     "pubkey": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "signature": "a686e35c450530fcc68573c4dc84d87bea2b35974f7517c96dfad77bb7720cb2acebfee8401135462dc1daba72ea4395fcd51933eacc4d94f56ab6ac0a575e0d",
+     "signed_by": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "timestamp": 1793536735,
+     "type": "genesis",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "backup_activates_after": null,
+     "backup_threshold": null,
+     "backup_trustees": null,
+     "hash_alg": "sha256",
+     "prev": "2a7c54e21feb8e29bd123c0234d60d3e92cd13ef41bfb1d13f7d73bd217a119c",
+     "primary_threshold": 2,
+     "primary_trustees": [
+      "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974",
+      "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22",
+      "2e8c2025a1a3276def1e3ccf56a5c2c9074c72253f9bcb82ad1dd5476a98a9e0"
+     ],
+     "signature": "6746165d0cb3f887876b70a6b704845684cd338415247481da2d8e3b77c745be1fbb869c13266cb17b53e31c1155e532728f3762653ba20a80b69b4cf6f9270e",
+     "signed_by": "6ded1e2598542de0347307af2727f9edc86725d2ec91ec98e98f76cb822ddb98",
+     "timestamp": 1793536735,
+     "type": "set_recovery",
+     "version": 1
+    },
+    {
+     "alg": "ed25519",
+     "hash_alg": "sha256",
+     "new_encryption_pubkey": "2e36633e999679cce0539a2082f3b64fdc99f88c8f153a063e6544210db67438",
+     "new_pubkey": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+     "prev": "ca3da486c5ce9ed69842db2cd104a6330973028d451a2eeb12e51dcfc6f9ac07",
+     "recovery_signatures": [
+      {
+       "key": "b981fc498ab566a16cbaa479ad63a8008b90cf942ba4d14246816e72e26f3e33",
+       "signature": "3362e7356baf2f1d334ffe1da7a2ce29e834c757400f97111995682ffcd8de8dd15df0cf6bcb1acaa681cc6b2f47ddf5b3d20d4fd8b4e1d3eb03aac1be8af407",
+       "state": "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974",
+       "trustee_identity": "125c57c9603b06705d12d6b2b322768b6f1a631a82aab831a81113af297ac974"
+      },
+      {
+       "key": "cba353a80840b8fbbc30ea77ea2cfa7b38a90d174a5238d8324f9a1e171ab127",
+       "signature": "dd7c654b00343cbcfdbdd07184710f1db13abb956939753f42139d5941f8cf9834ef3ee05cd04bb3926d8d6feb0125fb6d129724473a464cca81777086f03c02",
+       "state": "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22",
+       "trustee_identity": "18245813b37866464d9c7d25a591f90c07e2d021d668fd4664d0bb7372f1ad22"
+      }
+     ],
+     "signature": "9618afff98bb178261865f94fbb4a15283ca3e291137589382c8f2a354fce496d722b7cd4194d843148e929fc4da607ecab73a0c7142e230c16d267960874903",
+     "signed_by": "16438cfdc9bbfea350bd906c409a478dbd0b758211e987879dfd5c11e3840bf3",
+     "timestamp": 1793536735,
+     "type": "social_recovery",
+     "version": 1
+    }
+   ],
+   "check_current": false,
+   "expect": {
+    "reference_error": "Event 2: unknown trustee 125c57c9603b",
+    "valid": false
+   },
+   "name": "recovery-needs-trustee-chains",
+   "related": {},
+   "why": "the trustees' chains are needed to check the signatures"
+  }
+ ],
+ "format": "nodetide-chain-vectors",
+ "now": 2000000000,
+ "version": 2
+}

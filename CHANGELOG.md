@@ -3,6 +3,17 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Go and ECR) - the Go auth server speaks sigchain v2; CI runs the tests
+
+- **Go** (`golang/auth`): a port of sigchain v2 verification: the two tracks, content commitments and Merkle proofs (`merkle.go`), light chains with `AttachContent`, `checkpoint`,
+  `revoke_claim` as a control event, `rotate_master` / `revoke_device` revocation fields (`untrusted_since`, `revoke_devices`), organizations with owners (governed events,
+  approvals, self and managed) and social recovery (`owners.go`). Other identities' chains are supplied with the request (`related_sigchains`), because this node has no
+  identity store. A login accepts a light chain. Go 1.27 (was 1.22), chi 5.5, Alpine 3.24, module path `github.com/nodetide/nodetide/golang`.
+- **Shared vectors**: `protocol-vectors/chain-v2.json` (made by `protocol-vectors/generate.py` from the Python reference, 19 cases: valid and invalid chains, light chains with
+  proofs, organizations, recovery, non-ASCII canonical JSON) is checked by `python/tests/test_protocol_vectors.py` and `golang/auth/v2_test.go`; the Kotlin module will run it too.
+- **CI**: new `Tests` workflow runs the Python suite and the Go tests (which include the vectors). The ECR repository `nodetide` now exists (scan on push; untagged and PR images
+  expire), so "Build Base Images" and "Build and Push Docker Images" pass; note that the latter's deploy jobs then also deploy to the old VPS `nodetide.kuklin.eu`.
+
 ## 2026-11-01 (key replacement) - owners replace a compromised verifier's key from outside
 
 - **Chain** (`core/identity.py`): `rotate_master` may carry `revoke_devices` (`"all"` or a list) and `untrusted_since`; `revoke_device` may carry `untrusted_since`. A rotation

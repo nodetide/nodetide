@@ -20,10 +20,12 @@ func num(n int64) json.Number { return json.Number(strconv.FormatInt(n, 10)) }
 // testIdentity builds sigchains the same way the Python implementation does
 // (same field set, canonical signing, sha256 event hashes).
 type testIdentity struct {
-	t          *testing.T
-	masterPriv ed25519.PrivateKey
-	events     []map[string]any
-	hashes     []string
+	t             *testing.T
+	masterPriv    ed25519.PrivateKey
+	events        []map[string]any // the control chain
+	hashes        []string
+	content       []map[string]any // the content track (claims)
+	contentHashes []string
 }
 
 func newKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
@@ -75,11 +77,43 @@ func (id *testIdentity) push(ev map[string]any) {
 	if err != nil {
 		id.t.Fatal(err)
 	}
+	if typ, _ := ev["type"].(string); contentTypes[typ] {
+		id.content = append(id.content, ev)
+		id.contentHashes = append(id.contentHashes, h)
+		return
+	}
 	id.events = append(id.events, ev)
 	id.hashes = append(id.hashes, h)
 }
 
 func (id *testIdentity) head() string { return id.hashes[len(id.hashes)-1] }
+
+// contentHead is the previous CONTENT event for the next content event (nil for the first).
+func (id *testIdentity) contentHead() any {
+	if len(id.contentHashes) == 0 {
+		return nil
+	}
+	return id.contentHashes[len(id.contentHashes)-1]
+}
+
+// commitment is what a control event signed now must carry (nil while there is no content).
+func (id *testIdentity) commitment() map[string]any {
+	if len(id.content) == 0 {
+		return nil
+	}
+	root, err := MerkleRoot(id.contentHashes)
+	if err != nil {
+		id.t.Fatal(err)
+	}
+	return map[string]any{"count": num(int64(len(id.content))), "root": root}
+}
+
+// contentFields are the fields every content event carries beyond the common ones.
+func (id *testIdentity) contentFields(ev map[string]any) {
+	ev["prev"] = id.contentHead()
+	ev["seq"] = num(int64(len(id.content)))
+	ev["control_ref"] = id.head()
+}
 
 func (id *testIdentity) masterHex() string {
 	return hex.EncodeToString(id.masterPriv.Public().(ed25519.PublicKey))
@@ -98,6 +132,9 @@ func (id *testIdentity) appendEvent(typ string, fields map[string]any) {
 	}
 	for k, v := range fields {
 		ev[k] = v
+	}
+	if c := id.commitment(); c != nil {
+		ev["content"] = c
 	}
 	sign(id.t, id.masterPriv, ev)
 	id.push(ev)
@@ -130,7 +167,7 @@ func (id *testIdentity) revoke(priv ed25519.PrivateKey) {
 // with UseNumber, then parsed and verified.
 func (id *testIdentity) wire() []any {
 	id.t.Helper()
-	raw, err := json.Marshal(id.events)
+	raw, err := json.Marshal(append(append([]map[string]any{}, id.events...), id.content...))
 	if err != nil {
 		id.t.Fatal(err)
 	}
@@ -593,13 +630,13 @@ func (id *testIdentity) addClaim(signer ed25519.PrivateKey, claimID string) {
 		"alg":        "ed25519",
 		"hash_alg":   "sha256",
 		"timestamp":  num(nowUnix() - 3),
-		"prev":       id.head(),
 		"signed_by":  hex.EncodeToString(pub),
 		"claim_id":   claimID,
 		"claim_type": "email",
 		"commitment": strings.Repeat("ab", 32),
 		"expires":    nil,
 	}
+	id.contentFields(ev)
 	sign(id.t, signer, ev)
 	id.push(ev)
 }
@@ -617,6 +654,9 @@ func (id *testIdentity) revokeClaim(signer ed25519.PrivateKey, claimID string) {
 		"claim_id":  claimID,
 		"reason":    nil,
 	}
+	if c := id.commitment(); c != nil {
+		ev["content"] = c
+	}
 	sign(id.t, signer, ev)
 	id.push(ev)
 }
@@ -627,8 +667,9 @@ func TestClaimEventsAreAccepted(t *testing.T) {
 	dev := id.addDevice("manage_claims")
 	id.addClaim(dev, "claim-0000000000002")
 	id.revokeClaim(dev, "claim-0000000000001")
-	if sc := id.chain(); sc.Len() != 5 {
-		t.Fatalf("expected 5 events, got %d", sc.Len())
+	// genesis, add_device and revoke_claim are control events; the two claims are content
+	if sc := id.chain(); sc.Len() != 3 || sc.ContentLen() != 2 {
+		t.Fatalf("expected 3 control and 2 content events, got %d and %d", sc.Len(), sc.ContentLen())
 	}
 }
 
@@ -710,11 +751,11 @@ func (id *testIdentity) setClaimOrder(signer ed25519.PrivateKey, claimType strin
 		"alg":        "ed25519",
 		"hash_alg":   "sha256",
 		"timestamp":  num(nowUnix() - 1),
-		"prev":       id.head(),
 		"signed_by":  hex.EncodeToString(pub),
 		"claim_type": claimType,
 		"order":      items,
 	}
+	id.contentFields(ev)
 	sign(id.t, signer, ev)
 	id.push(ev)
 }
@@ -726,8 +767,8 @@ func TestClaimOrderEventIsAccepted(t *testing.T) {
 	id.setClaimOrder(id.masterPriv, "email", "claim-0000000000002", "claim-0000000000001")
 	dev := id.addDevice("manage_claims")
 	id.setClaimOrder(dev, "email", "claim-0000000000001")
-	if sc := id.chain(); sc.Len() != 6 {
-		t.Fatalf("expected 6 events, got %d", sc.Len())
+	if sc := id.chain(); sc.Len() != 2 || sc.ContentLen() != 4 {
+		t.Fatalf("expected 2 control and 4 content events, got %d and %d", sc.Len(), sc.ContentLen())
 	}
 }
 

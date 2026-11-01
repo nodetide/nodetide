@@ -161,9 +161,50 @@ func (h *Handler) Challenge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, req)
 }
 
+// maxRelatedChains bounds how many other identities' chains one request may bring.
+const maxRelatedChains = 32
+
+// resolverFromRequest looks up other identities' chains (the owners of an
+// organization, the trustees of a recovery) among the request's
+// "related_sigchains": {identity hash: [events]}. This node has no identity
+// store, so whoever logs in brings them; each is verified like any chain and
+// must really be the identity it is filed under.
+func resolverFromRequest(data map[string]any) func(string) *Sigchain {
+	related, _ := data["related_sigchains"].(map[string]any)
+	if len(related) == 0 || len(related) > maxRelatedChains {
+		return nil
+	}
+	cache := map[string]*Sigchain{}
+	busy := map[string]bool{}
+	var resolve func(string) *Sigchain
+	resolve = func(id string) *Sigchain {
+		if sc, ok := cache[id]; ok {
+			return sc
+		}
+		list, ok := related[id].([]any)
+		if !ok || busy[id] {
+			return nil
+		}
+		busy[id] = true
+		defer delete(busy, id)
+		sc, err := ParseSigchainWith(list, Options{Resolve: resolve})
+		if err != nil || sc.IdentityHash() != id {
+			cache[id] = nil
+			return nil
+		}
+		cache[id] = sc
+		return sc
+	}
+	return resolve
+}
+
 // Verify handles POST /api/auth/verify.
 //
-//	{"assertion": {...}, "sigchain": [...]}
+//	{"assertion": {...}, "sigchain": [...], "related_sigchains": {"<identity>": [...]}?}
+//
+// The sigchain may be the control chain alone (a light chain): that is enough to
+// check a login. "related_sigchains" is only needed for organizations with owners
+// and for identities restored by social recovery.
 func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	data, err := readObject(w, r)
 	if err != nil {
@@ -199,7 +240,7 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "sigchain must be a list of events", nil)
 		return
 	}
-	chain, err := ParseSigchain(events)
+	chain, err := ParseSigchainWith(events, Options{Resolve: resolverFromRequest(data)})
 	if err != nil {
 		if IsMalformed(err) {
 			writeError(w, 400, "invalid_request", "Malformed sigchain", nil)

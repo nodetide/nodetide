@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore: ['**.md']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install
+        working-directory: python
+        run: pip install -e ".[dev]" keyring   # keyring: the test wallet stores its key there on a Mac, tests stub it
+      - name: Test (the browser tests need Chrome and are skipped here)
+        working-directory: python
+        run: python -m pytest tests -q
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: golang/go.mod
+      - name: Vet and test (includes the cross-language chain vectors)
+        working-directory: golang
+        run: |
+          mkdir -p web && cp -r ../web/. web/   # main.go embeds the web client, as the Dockerfile arranges
+          go vet ./...
+          go test ./...
