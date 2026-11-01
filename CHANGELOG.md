@@ -3,6 +3,27 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (browser wallet) - claims and verification in the browser, no server-side keys
+
+### Added
+- **Browser wallet** (`web/js/app.js`, view "Wallet"): add email and phone claims, verify them with a code from the verification service, keep the
+  attestations. Claim values, salts, attestations, issuer chains and pending verifications are one blob in localStorage, encrypted with the identity's
+  password (PBKDF2 + AES-GCM); the unlocked keys, the password and the decrypted data exist only in memory (`WalletSession`) and are dropped after 15 idle
+  minutes or on reload. The backup file now carries the wallet data and a restore brings it back. Commitments, claim normalization and assertions are
+  byte-compatible with `core/claims.py` / `core/auth.py` (checked by the verifier recomputing them in the browser test).
+- The node serves `/api/web-config` (`NODETIDE_WEB_VERIFIER_URL`, set from `VERIFIER_URL` in the test stack); the verifier answers CORS for its public,
+  assertion-authenticated endpoints (`/api/verify/*`, `/api/auth/challenge`, `/api/issuer/request`).
+- Test: `python/tests/test_web_wallet_browser.py` (headless Chrome, real verifier on another origin).
+
+### Fixed
+- The client's canonical JSON did not escape non-ASCII like Python's `json.dumps`, so a name or label such as "Алекс" gave a signature and identity hash
+  the node rejects. The web client's device was also given capabilities that do not exist (`sign`, `decrypt`); it now gets `authenticate` and
+  `manage_claims` (an existing web identity is re-authorized the first time it verifies a claim).
+
+### Open
+- Sign-in approval in the browser, then removing the public `nt-wallet` service (still behind its password until then); eID statements, birth date,
+  legal name UI; a content security policy for the web client; `navigator.storage.persist()`.
+
 ## 2026-11-01 (owners) - organization identities owned by weighted owner identities
 
 ### Added

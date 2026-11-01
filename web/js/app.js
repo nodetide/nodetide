@@ -55,6 +55,9 @@
     return bytes;
   }
 
+  // What the web client's device key may do: sign sign-in assertions (authenticate) and keep the identity's claims
+  const DEVICE_CAPABILITIES = ['sign_messages', 'encrypt', 'authenticate', 'manage_claims'];
+
   function canonicalize(obj) {
     // Recursively sort keys and create compact JSON (no whitespace in structure)
     function sortRecursive(val) {
@@ -73,7 +76,9 @@
       }
       return sorted;
     }
-    return JSON.stringify(sortRecursive(obj));
+    // Python signs json.dumps(..., ensure_ascii=True): every non-ASCII character is a \\uXXXX escape. Match it, or
+    // a name or label with such a character gives a signature and a hash the node does not reproduce.
+    return JSON.stringify(sortRecursive(obj)).replace(/[\u0080-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
   }
 
   async function sha256(data) {
@@ -301,7 +306,7 @@
         device_pubkey: deviceKeyPair.signing.publicKey,
         device_encryption_pubkey: deviceKeyPair.encryption.publicKey,
         label: 'Web Browser',
-        capabilities: ['sign', 'encrypt', 'decrypt'],
+        capabilities: DEVICE_CAPABILITIES,
         expires: null,
       };
       const addDeviceSignable = canonicalize(addDeviceEvent);
@@ -388,6 +393,7 @@
         name: identity.name, distribution_points: identity.distributionPoints || null, created_at: identity.createdAt,
         master_keys: keys.master, device_keys: keys.device,
         genesis_event: identity.genesisEvent, add_device_event: identity.addDeviceEvent,
+        wallet: await Wallet.exportData(identityHash, identityPassword), // claim values, salts, attestations
       };
       const encrypted = await Crypto.encryptWithPassword(JSON.stringify(payload), backupPassword, BACKUP_KDF_ITERATIONS);
       const back = await Crypto.decryptWithPassword(encrypted, backupPassword);
@@ -439,6 +445,7 @@
       const others = this.listIdentities().filter(i => i.identityHash !== identity.identityHash);
       localStorage.setItem(STORAGE_KEYS.IDENTITIES, JSON.stringify([...others, identity]));
       ProtectionState.save(identity.identityHash, { backupAt: file.created_at || Date.now() });
+      if (payload.wallet) await Wallet.importData(identity.identityHash, payload.wallet, localPassword);
 
       // Make sure the node knows the identity (it normally does already)
       try { await api.submitGenesisEvent(genesis); } catch { /* already there */ }
@@ -658,7 +665,7 @@
         version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: timestamp + 1,
         prev: await sha256(canonicalize(recovery)), signed_by: master.signing.publicKey,
         device_pubkey: device.signing.publicKey, device_encryption_pubkey: device.encryption.publicKey,
-        label: 'Web Browser', capabilities: ['sign', 'encrypt', 'decrypt'], expires: null,
+        label: 'Web Browser', capabilities: DEVICE_CAPABILITIES, expires: null,
       };
       addDevice.signature = Crypto.sign(canonicalize(addDevice), master.signing.secretKey);
       await api.submitEvent(pending.identityHash, addDevice);
@@ -817,6 +824,273 @@
     },
     save(hash, patch) {
       try { localStorage.setItem(this.key(hash), JSON.stringify({ ...this.load(hash), ...patch })); } catch { /* storage unavailable */ }
+    },
+  };
+
+  // ============================================
+  // WALLET: claims, verification and attestations, kept in this browser
+  // ============================================
+  // Nothing is held by a server. The claim values, attestations and verification state live in localStorage as one
+  // blob encrypted (PBKDF2 + AES-GCM) with the identity's password; the unlocked keys, the password and the decrypted
+  // blob exist only in memory (WalletSession) and are dropped after WALLET_IDLE_MS or on reload.
+  // Byte-for-byte compatible with python/src/nodetide/core/claims.py and auth.py.
+
+  const WALLET_IDLE_MS = 15 * 60 * 1000;
+  const CLAIM_DOMAIN = 'nodetide-claim-v1\u0000';
+  const AUTH_DOMAIN = 'nodetide-auth-v1\u0000';
+  const EMAIL_LOCAL_RE = /^[^\s@\u0000-\u001f]{1,64}$/;
+  const DOMAIN_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+  const PHONE_RE = /^\+[1-9][0-9]{6,14}$/;
+
+  const WalletSession = {
+    _s: new Map(),
+    get(hash) {
+      const s = this._s.get(hash);
+      if (!s) return null;
+      clearTimeout(s.timer);
+      s.timer = setTimeout(() => this.lock(hash), WALLET_IDLE_MS);
+      return s;
+    },
+    set(hash, session) {
+      this.lock(hash);
+      session.timer = setTimeout(() => this.lock(hash), WALLET_IDLE_MS);
+      this._s.set(hash, session);
+      const store = window.Alpine && Alpine.store('wallet');
+      if (store) store.sync();
+    },
+    isUnlocked(hash) { return this._s.has(hash); },
+    lock(hash) {
+      const s = this._s.get(hash);
+      if (s) clearTimeout(s.timer);
+      this._s.delete(hash);
+      const store = window.Alpine && Alpine.store('wallet');
+      if (store) store.sync();
+    },
+  };
+
+  const Wallet = {
+    storageKey(hash) { return `nodetide_wallet_${hash}`; },
+    emptyData() { return { claims: {}, attestations: [], issuer_chains: {}, verifications: {} }; },
+
+    async unlock(hash, password) {
+      const identity = KeyStore.getIdentity(hash);
+      if (!identity) throw new Error('Identity not found');
+      if (!identity.encryptedMasterKeys) throw new Error('This browser does not hold this identity\'s master key');
+      const { master, device } = await KeyStore._unlockBoth(identity, password);
+      let data = this.emptyData();
+      const stored = localStorage.getItem(this.storageKey(hash));
+      if (stored) {
+        try { data = { ...data, ...(await Crypto.decryptWithPassword(JSON.parse(stored), password)) }; } catch {
+          throw new Error('The stored wallet data could not be decrypted');
+        }
+      }
+      WalletSession.set(hash, { master, device, password, data, identity });
+      return data;
+    },
+
+    session(hash) {
+      const s = WalletSession.get(hash);
+      if (!s) throw new Error('Unlock the wallet first');
+      return s;
+    },
+
+    async save(hash) {
+      const s = this.session(hash);
+      const blob = await Crypto.encryptWithPassword(s.data, s.password);
+      localStorage.setItem(this.storageKey(hash), JSON.stringify(blob));
+    },
+
+    // ---- values ----
+    nfc(text) { return text.normalize('NFC'); },
+
+    normalizeValue(type, value) {
+      if (type === 'email') {
+        if (typeof value !== 'string') throw new Error('email must be a string');
+        const text = this.nfc(value.trim());
+        const at = text.lastIndexOf('@');
+        if (at < 0) throw new Error('invalid email address');
+        const local = text.slice(0, at), domain = text.slice(at + 1);
+        if (!EMAIL_LOCAL_RE.test(local)) throw new Error('invalid email address');
+        let ascii;
+        try { ascii = new URL('http://' + domain).hostname.toLowerCase(); } catch { throw new Error('invalid email domain'); }
+        const labels = ascii.split('.');
+        if (!domain || labels.length < 2 || !labels.every(l => DOMAIN_LABEL_RE.test(l))) throw new Error('invalid email domain');
+        const result = `${local}@${ascii}`;
+        if (result.length > 254) throw new Error('email address is too long');
+        return result;
+      }
+      if (type === 'phone') {
+        if (typeof value !== 'string') throw new Error('phone must be a string');
+        const text = value.replace(/[\s().-]/g, '');
+        if (!PHONE_RE.test(text)) throw new Error('phone must be an E.164 number such as +359881234567');
+        return text;
+      }
+      if (type === 'legal_name') {
+        const out = {};
+        for (const key of ['given_name', 'family_name']) {
+          const part = value && value[key];
+          if (typeof part !== 'string' || !part.trim() || part.length > 100) throw new Error(`${key} must be a non-empty string`);
+          out[key] = this.nfc(part.trim());
+        }
+        return out;
+      }
+      throw new Error(`The browser wallet does not handle ${type} claims yet`);
+    },
+
+    async commitment(claimId, type, saltHex, value) {
+      const enc = new TextEncoder();
+      const parts = [
+        enc.encode(CLAIM_DOMAIN + claimId + '\u0000' + type + '\u0000'), decodeHex(saltHex),
+        enc.encode('\u0000' + canonicalize(this.normalizeValue(type, value))),
+      ];
+      const bytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+      let offset = 0;
+      for (const p of parts) { bytes.set(p, offset); offset += p.length; }
+      return sha256(bytes);
+    },
+
+    newClaimId() {
+      for (;;) {
+        const raw = crypto.getRandomValues(new Uint8Array(16));
+        const id = btoa(String.fromCharCode(...raw)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        if (/^[A-Za-z0-9]/.test(id)) return id;
+      }
+    },
+
+    async chain(hash) {
+      const c = await api.request('GET', `/identities/${hash}/sigchain`);
+      const events = c.events || [];
+      return { events, head: await sha256(canonicalize(events[events.length - 1])) };
+    },
+
+    // ---- claims ----
+    async addClaim(hash, type, value) {
+      const s = this.session(hash);
+      const normalized = this.normalizeValue(type, value);
+      const claimId = this.newClaimId();
+      const salt = encodeHex(crypto.getRandomValues(new Uint8Array(16)));
+      const commitment = await this.commitment(claimId, type, salt, normalized);
+      const { head } = await this.chain(hash);
+      const event = {
+        version: 1, type: 'add_claim', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: head, signed_by: s.master.signing.publicKey, claim_id: claimId, claim_type: type, commitment, expires: null,
+      };
+      event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
+      // keep the value before the chain commits to it: a commitment without its value could never be shown again
+      s.data.claims[claimId] = { identity: hash, claim_id: claimId, claim_type: type, value: normalized, salt };
+      await this.save(hash);
+      try {
+        await api.submitEvent(hash, event);
+      } catch (e) {
+        delete s.data.claims[claimId];
+        await this.save(hash);
+        throw e;
+      }
+      return s.data.claims[claimId];
+    },
+
+    // ---- verification service ----
+    async verifierUrl() {
+      const own = Settings.get('verifierUrl', '');
+      if (own) return own.replace(/\/+$/, '');
+      try {
+        const cfg = await api.request('GET', '/web-config');
+        if (cfg.verifier_url) return cfg.verifier_url.replace(/\/+$/, '');
+      } catch { /* not configured */ }
+      throw new Error('No verification service is configured (Settings -> Verification service URL)');
+    },
+
+    async verifier(method, path, body) {
+      const base = await this.verifierUrl();
+      const response = await fetch(base + path, {
+        method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const json = await response.json().catch(() => ({}));
+      return { status: response.status, json };
+    },
+
+    async ensureDeviceMayAuthenticate(hash) {
+      /** Older web identities were given capabilities that do not exist; re-authorize the device with the real ones. */
+      const s = this.session(hash);
+      const { events, head } = await this.chain(hash);
+      let caps = [];
+      for (const e of events) {
+        if (e.type === 'add_device' && e.device_pubkey === s.device.signing.publicKey) caps = e.capabilities || [];
+      }
+      if (caps.includes('authenticate') && caps.includes('manage_claims')) return;
+      const event = {
+        version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: head, signed_by: s.master.signing.publicKey, device_pubkey: s.device.signing.publicKey,
+        device_encryption_pubkey: s.device.encryption.publicKey, label: 'Web Browser', capabilities: DEVICE_CAPABILITIES, expires: null,
+      };
+      event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
+      await api.submitEvent(hash, event);
+    },
+
+    async assertion(hash, request, claims) {
+      const s = this.session(hash);
+      const { head } = await this.chain(hash);
+      const iat = Math.floor(Date.now() / 1000);
+      const body = {
+        type: 'AUTH_ASSERTION', identity: hash, device: s.device.signing.publicKey, aud: request.aud, nonce: request.nonce,
+        iat, exp: Math.min(iat + 300, iat + 600, request.expires_at), chain_head: head,
+      };
+      if (claims) body.claims = claims;
+      return { ...body, sig: Crypto.sign(AUTH_DOMAIN + canonicalize(body), s.device.signing.secretKey) };
+    },
+
+    async startVerification(hash, claimId) {
+      const s = this.session(hash);
+      const doc = s.data.claims[claimId];
+      if (!doc) throw new Error('Unknown claim');
+      if (!['email', 'phone'].includes(doc.claim_type)) throw new Error('Only email and phone claims are verified with a code');
+      await this.ensureDeviceMayAuthenticate(hash);
+      const challenge = await this.verifier('POST', '/api/auth/challenge', {});
+      if (challenge.status !== 201) throw new Error(`The verification service refused a challenge (${challenge.status})`);
+      const assertion = await this.assertion(hash, challenge.json, { purpose: 'claim_verification', claim_id: claimId });
+      const { events } = await this.chain(hash);
+      const started = await this.verifier('POST', `/api/verify/${doc.claim_type}/start`, { document: doc, assertion, sigchain: events });
+      if (started.status !== 202) throw new Error(started.json.message || `Verification not started (${started.status})`);
+      s.data.verifications[claimId] = { verification_id: started.json.verification_id, expires_at: started.json.expires_at, kind: doc.claim_type };
+      await this.save(hash);
+      return { expiresAt: started.json.expires_at, message: started.json.message || '' };
+    },
+
+    async confirmVerification(hash, claimId, code) {
+      const s = this.session(hash);
+      const pending = s.data.verifications[claimId];
+      if (!pending) throw new Error('Start the verification first');
+      const confirmed = await this.verifier('POST', `/api/verify/${pending.kind}/confirm`, {
+        verification_id: pending.verification_id, code: String(code).trim(),
+      });
+      if (confirmed.status !== 201) throw new Error(confirmed.json.message || `The code was not accepted (${confirmed.status})`);
+      const att = confirmed.json.attestation;
+      const doc = s.data.claims[claimId];
+      if (att.subject !== hash || att.claim_id !== claimId || att.commitment !== (await this.commitment(claimId, doc.claim_type, doc.salt, doc.value))) {
+        throw new Error('The attestation does not match this claim; it was not kept');
+      }
+      const info = await this.verifier('GET', '/api/verify/issuer');
+      if (info.status === 200 && info.json.issuer === att.issuer) {
+        s.data.issuer_chains[att.issuer] = { name: info.json.name || null, sigchain: info.json.sigchain, owner_sigchains: info.json.owner_sigchains || {} };
+      }
+      s.data.attestations = s.data.attestations.filter(a => a.id !== att.id).concat([att]);
+      delete s.data.verifications[claimId];
+      await this.save(hash);
+      return att;
+    },
+
+    // ---- backup support ----
+    async exportData(hash, identityPassword) {
+      const stored = localStorage.getItem(this.storageKey(hash));
+      if (!stored) return this.emptyData();
+      try { return { ...this.emptyData(), ...(await Crypto.decryptWithPassword(JSON.parse(stored), identityPassword)) }; } catch {
+        throw new Error('The stored wallet data could not be decrypted');
+      }
+    },
+
+    async importData(hash, data, password) {
+      const blob = await Crypto.encryptWithPassword({ ...this.emptyData(), ...data }, password);
+      localStorage.setItem(this.storageKey(hash), JSON.stringify(blob));
     },
   };
 
@@ -1053,6 +1327,16 @@
       },
     });
 
+    // Wallet: is the active identity's wallet unlocked (keys and data in memory only)?
+    Alpine.store('wallet', {
+      unlocked: false,
+      init() { this.sync(); },
+      sync() {
+        const hash = Alpine.store('identity') && Alpine.store('identity').activeHash;
+        this.unlocked = !!hash && WalletSession.isUnlocked(hash);
+      },
+    });
+
     // Protection: the banner shows until the identity has an encrypted backup AND social recovery
     Alpine.store('protection', {
       hash: null,
@@ -1086,6 +1370,82 @@
       openBackup() { this.showBackup = true; },
       openRecovery() { this.showRecovery = true; },
     });
+
+    // Wallet view: claims, verification, attestations
+    Alpine.data('walletUI', () => ({
+      password: '',
+      email: '',
+      phone: '',
+      codes: {},
+      claims: [],
+      busyId: null,
+      note: '',
+
+      get hash() { return Alpine.store('identity').activeHash; },
+      get unlocked() { return Alpine.store('wallet').unlocked; },
+
+      refresh() {
+        const s = this.hash && WalletSession.get(this.hash);
+        this.claims = !s ? [] : Object.values(s.data.claims).map(doc => {
+          const att = s.data.attestations.find(a => a.claim_id === doc.claim_id);
+          const pending = s.data.verifications[doc.claim_id];
+          return {
+            id: doc.claim_id, type: doc.claim_type,
+            value: typeof doc.value === 'string' ? doc.value : Object.values(doc.value).join(' '),
+            verified: !!att, method: att ? att.method : null, assurance: att ? att.assurance : null,
+            issuer: att ? (s.data.issuer_chains[att.issuer] && s.data.issuer_chains[att.issuer].name) || att.issuer.slice(0, 12) : null,
+            pending: !!pending, codeable: ['email', 'phone'].includes(doc.claim_type),
+          };
+        });
+      },
+
+      async unlock() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          await Wallet.unlock(this.hash, this.password);
+          this.password = '';
+          this.refresh();
+        } catch (e) {
+          app.showError('Could not unlock: ' + e.message);
+        } finally {
+          app.loading = false;
+        }
+      },
+
+      lock() { WalletSession.lock(this.hash); this.claims = []; },
+
+      async run(busyId, work, success) {
+        const app = Alpine.store('app');
+        app.loading = true;
+        this.busyId = busyId;
+        try {
+          const result = await work();
+          this.refresh();
+          if (success) app.showSuccess(typeof success === 'function' ? success(result) : success);
+        } catch (e) {
+          app.showError(e.message);
+        } finally {
+          this.busyId = null;
+          app.loading = false;
+        }
+      },
+
+      async addEmail() {
+        const value = this.email;
+        await this.run('add', async () => { await Wallet.addClaim(this.hash, 'email', value); this.email = ''; }, 'Email claim added. Verify it below.');
+      },
+      async addPhone() {
+        const value = this.phone;
+        await this.run('add', async () => { await Wallet.addClaim(this.hash, 'phone', value); this.phone = ''; }, 'Phone claim added. Verify it below.');
+      },
+      async verify(id) {
+        await this.run(id, () => Wallet.startVerification(this.hash, id), r => r.message || 'A code was sent. Type it below.');
+      },
+      async confirm(id) {
+        await this.run(id, async () => { const a = await Wallet.confirmVerification(this.hash, id, this.codes[id] || ''); this.codes[id] = ''; return a; }, 'Verified.');
+      },
+    }));
 
     // Backup and recovery dialogs (opened from the banner)
     Alpine.data('protectionUI', () => ({

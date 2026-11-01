@@ -600,6 +600,10 @@
             :class="{ active: $store.app.currentView === 'identity' }">
       My Identity
     </button>
+    <button @click="$store.app.setView('wallet')"
+            :class="{ active: $store.app.currentView === 'wallet' }">
+      Wallet
+    </button>
     <button @click="$store.app.setView('trust')"
             :class="{ active: $store.app.currentView === 'trust' }">
       Trust
@@ -1123,6 +1127,75 @@
               </button>
             </div>
           </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wallet view: claims and their verification, kept in this browser -->
+    <div x-show="$store.app.currentView === 'wallet'" x-data="walletUI" x-effect="$store.wallet.unlocked; $store.identity.activeHash; refresh()" x-cloak>
+      <div class="card" x-show="!$store.identity.activeHash">
+        <p class="text-muted">Create or choose an identity first.</p>
+      </div>
+      <div class="card" x-show="$store.identity.activeHash && !unlocked">
+        <div class="card-header"><span class="card-title">Unlock the wallet</span></div>
+        <p class="text-small text-muted mb-1">
+          Your claims and attestations are encrypted in this browser with your identity's password. They are decrypted
+          into memory only while the wallet is unlocked (it locks itself after 15 idle minutes) and never leave the browser,
+          except what you choose to show.
+        </p>
+        <form @submit.prevent="unlock">
+          <div class="form-group">
+            <label>Identity password</label>
+            <input type="password" x-model="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn" :disabled="$store.app.loading">Unlock</button>
+        </form>
+      </div>
+
+      <div x-show="unlocked">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Claims</span>
+            <button class="btn btn-small btn-secondary" @click="lock()">Lock</button>
+          </div>
+          <p class="text-muted text-small" x-show="claims.length === 0">No claims yet. Add an email address or a phone number below.</p>
+          <template x-for="c in claims" :key="c.id">
+            <div class="mb-1" style="padding: 0.5rem 0; border-top: 1px solid var(--border, #ddd)">
+              <div>
+                <strong x-text="c.type"></strong>
+                <span x-text="c.value"></span>
+                <span class="badge" x-show="c.verified" style="color: var(--success)">
+                  &#10003; verified by <span x-text="c.issuer"></span> (<span x-text="c.method"></span>, <span x-text="c.assurance"></span>)
+                </span>
+              </div>
+              <div x-show="!c.verified && c.codeable" class="flex gap-1" style="margin-top: 0.4rem; flex-wrap: wrap">
+                <button class="btn btn-small" @click="verify(c.id)" :disabled="$store.app.loading">
+                  <span x-text="c.pending ? 'Send a new code' : 'Verify'"></span>
+                </button>
+                <template x-if="c.pending">
+                  <form class="flex gap-1" @submit.prevent="confirm(c.id)">
+                    <input type="text" x-model="codes[c.id]" placeholder="Code from the message" autocomplete="one-time-code" required>
+                    <button type="submit" class="btn btn-small" :disabled="$store.app.loading">Confirm</button>
+                  </form>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Add a claim</span></div>
+          <form class="flex gap-1 mb-1" @submit.prevent="addEmail">
+            <input type="email" x-model="email" placeholder="you@example.org" required>
+            <button type="submit" class="btn btn-small" :disabled="$store.app.loading">Add email</button>
+          </form>
+          <form class="flex gap-1" @submit.prevent="addPhone">
+            <input type="text" x-model="phone" placeholder="+359881234567" required>
+            <button type="submit" class="btn btn-small" :disabled="$store.app.loading">Add phone</button>
+          </form>
+          <p class="text-small text-muted mt-1">
+            Only a fingerprint (a salted commitment) of each value goes on your identity's chain. The verification service
+            sees the value once, to send you a code.
+          </p>
         </div>
       </div>
     </div>

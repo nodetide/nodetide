@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -203,6 +204,11 @@ async def get_identity(request: web.Request) -> web.Response:
             master_pubkey=sigchain.get_current_master_key() or "",
         ).to_dict()
     )
+
+
+async def web_config(request: web.Request) -> web.Response:
+    """GET /web-config - what the browser client needs to know about this deployment."""
+    return web.json_response({"verifier_url": os.environ.get("NODETIDE_WEB_VERIFIER_URL", "").rstrip("/")})
 
 
 async def get_sigchain(request: web.Request) -> web.Response:
@@ -1049,6 +1055,7 @@ def setup_routes(app: web.Application) -> None:
 
     # Query routes
     app.router.add_post("/api/verify", verify_sigchain)
+    app.router.add_get("/api/web-config", web_config)
     app.router.add_get("/api/lookup/{hash}", lookup_identity)
 
     # Message routes

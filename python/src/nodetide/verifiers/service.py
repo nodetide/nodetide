@@ -80,6 +80,32 @@ async def _stop(app: web.Application) -> None:
     app["storage"].close()
 
 
+_CORS_PATHS = ("/api/verify/", "/api/auth/challenge", "/api/issuer/request")
+
+
+@web.middleware
+async def cors(request: web.Request, handler):
+    """The browser wallet talks to this service directly. Nothing here uses cookies or ambient credentials: every
+    call that matters is authenticated by a signed assertion or a one-time code, so any origin may call it."""
+    if not request.path.startswith(_CORS_PATHS):
+        return await handler(request)
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "600",
+    }
+    if request.method == "OPTIONS":
+        return web.Response(status=204, headers=headers)
+    try:
+        response = await handler(request)
+    except web.HTTPException as e:  # errors raised as exceptions must carry the headers too, or the browser hides them
+        e.headers.update(headers)
+        raise
+    response.headers.update(headers)
+    return response
+
+
 def create_verifier_app(
     storage: Storage,
     verifiers: CodeVerifier | Iterable[CodeVerifier],
@@ -90,7 +116,7 @@ def create_verifier_app(
     notary: EidNotary | None = None,
 ) -> web.Application:
     verifier_list = [verifiers] if isinstance(verifiers, CodeVerifier) else list(verifiers or [])
-    app = web.Application()
+    app = web.Application(middlewares=[cors])
     app["storage"] = storage
     app["verifiers"] = {v.claim_type: v for v in verifier_list}
     app["issuer"] = verifier_list[0].issuer if verifier_list else notary.issuer  # type: ignore[union-attr]
@@ -126,7 +152,7 @@ def run_pending(
         reason = str(e)
     logger.warning("not issuing yet: %s", reason)
     logger.warning("founding request for the owners: %s", json.dumps(body))
-    app = web.Application()
+    app = web.Application(middlewares=[cors])
     app["issuer_request"] = {**body, "status": "pending", "reason": reason}
     app.router.add_get("/health", health)
     app.router.add_get("/", issuer_request)
