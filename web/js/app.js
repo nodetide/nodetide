@@ -1837,7 +1837,7 @@
         }
       },
 
-      cancel() { this.preview = null; this.link = ''; Alpine.store('app').setView('wallet'); },
+      cancel() { this.preview = null; this.link = ''; Alpine.store('app').setView('identity'); },
     }));
 
     // Wallet view: claims, verification, attestations

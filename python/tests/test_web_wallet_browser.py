@@ -93,8 +93,8 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                     info = await r.json()
                 assert info["name"] == "Алекс" and info["verified"] is True
 
-                # the organizations card is on the Wallet tab, visible even while the wallet is locked
-                await page.js("Alpine.store('app').setView('wallet')")
+                # the organizations card is on the My Identity tab, visible even while the wallet is locked
+                await page.js("Alpine.store('app').setView('identity')")
                 assert await page.js("""(()=>{const e=[...document.querySelectorAll('.card-title')]
                     .find(x=>x.textContent.includes('Organizations you own')); return !!e && e.offsetParent!==null})()""")
 

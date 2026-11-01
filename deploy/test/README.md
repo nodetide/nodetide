@@ -212,7 +212,7 @@ trustees) is the organization's recovery. Setting it up, once:
 1. In the web client (`nt-node.<domain>`) create your identity, back it up and set up recovery (the banner).
 2. Once, on the server: `ISSUER_OWNED=1` and `ISSUER_OWNERS=<your identity hash>` (several: `hash:weight,hash:weight`) in `.env`,
    then `docker compose up -d verifier`. That is the only operator step; the verifier makes its keys and waits.
-3. In the web client, **Wallet** tab, **Organizations you own**: the card fetches the verifier's founding request by itself.
+3. In the web client, **My Identity** tab, **Organizations you own**: the card fetches the verifier's founding request by itself.
    Check the name and press Approve (a passkey or the unlocked wallet confirms it). With several owners each approves in turn and
    passes the result on; the last one publishes it.
 4. Nothing else. The verifier sees the approval on the node within seconds, adopts the organization, restarts itself and starts

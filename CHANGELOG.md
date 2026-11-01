@@ -3,6 +3,11 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (layout) - claims live in the My Identity tab
+
+- The separate Wallet tab is gone: the identity's claims (add, verify, timeline, renounce, publish), the passkey control and "Organizations you own" are in the **My Identity** tab,
+  under the identity info. The sign-in approval screen returns there on Cancel.
+
 ## 2026-11-01 (sigchain v2) - a control chain that commits to its content; light verification
 
 Clean slate: v1 chains are not read (the test server's data is dropped). Spec: `sigchain-v2.md`.
