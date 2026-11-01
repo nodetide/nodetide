@@ -209,7 +209,9 @@ def create_app(
     # Email responder (off unless NODETIDE_MAIL_RESPONDER=1)
     from nodetide.mailresponder import config as mail_config
     if mail_config.enabled():
-        app["mail_responder"], app["mail_poller"] = mail_config.build(app["storage"])
+        app["mail_responder"], app["mail_poller"], mail_fetch = mail_config.build(app["storage"])
+        if app.get("oidc") is not None:
+            mail_config.attach_fetcher(mail_fetch, app["oidc"].fetcher)
         logger.info("Mail responder enabled (%s)", app["mail_responder"].config.address)
 
     # Setup lifecycle hooks

@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable, Iterable
 from nodetide.core.auth import choose_sigchain
 from nodetide.core.identity import Sigchain
 from nodetide.core.storage import Storage
+from nodetide.mailresponder.addresses import mail_points
 from nodetide.oidc.netguard import http_fetch_sigchain, validate_source_url
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class IdentityFetcher:
         self._task: asyncio.Task | None = None
         self._wake = asyncio.Event()
         self._running = False
+        self.mail = None   # a MailFetchService: asks `mailto:` distribution points when the HTTP sources did not help
         with storage.transaction() as cur:
             cur.executescript(_SCHEMA)
 
@@ -203,6 +205,32 @@ class IdentityFetcher:
                 sources.append(seed)
         return sources[:MAX_SOURCES]
 
+    def _mail_sources(self, identity_hash: str) -> list[str]:
+        """Mailboxes among the identity's own (signed) distribution points; hints from sign-in pages are never mail."""
+        stored = self._storage.get_sigchain(identity_hash)
+        if stored is None:
+            return []
+        points: list[str] = []
+        for event in stored.events:
+            points = getattr(event, "distribution_points", None) or points   # the newest setting wins
+        return mail_points(points)
+
+    async def deliver(self, identity_hash: str, events: list[dict[str, Any]]) -> None:
+        """A chain arrived by another channel (an email answer): verify, store, finish the fetch if it is satisfied."""
+        if not isinstance(identity_hash, str) or not IDENTITY_RE.match(identity_hash):
+            return
+        updated = self._ingest(identity_hash, events)
+        with self._storage.transaction() as cur:
+            cur.execute("SELECT want_head, attempts, state FROM oidc_pending_fetches WHERE identity_hash = ?", (identity_hash,))
+            row = cur.fetchone()
+        if row is not None and row["state"] == "pending" and self._satisfied(identity_hash, row["want_head"]):
+            self._finish(identity_hash, "done", row["attempts"], int(self._clock()), None)
+        if updated and self._on_update is not None:
+            try:
+                await self._on_update(identity_hash)
+            except Exception:
+                logger.exception("on_update failed for %s", identity_hash[:16])
+
     async def _process(self, row: Any) -> None:
         identity_hash = row["identity_hash"]
         want_head = row["want_head"]
@@ -228,6 +256,19 @@ class IdentityFetcher:
             if self._satisfied(identity_hash, want_head):
                 break
             error = f"{source}: chain is older than required"
+
+        # Last resort: ask by email. The answer comes later through deliver(); this attempt only sends the request.
+        if self.mail is not None and not self._satisfied(identity_hash, want_head):
+            asked = 0
+            for address in self._mail_sources(identity_hash):
+                if asked >= 2:
+                    break
+                try:
+                    outcome = await self.mail.request(address, identity_hash, self._storage.get_sigchain(identity_hash))
+                except Exception as e:   # the mail server being down must not fail the fetch loop
+                    outcome = f"failed ({type(e).__name__})"
+                asked += outcome == "sent"
+                error = f"mailto: {outcome}"
 
         attempts = row["attempts"] + 1
         if self._satisfied(identity_hash, want_head):

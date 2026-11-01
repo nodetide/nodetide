@@ -13,6 +13,16 @@ Chains verify themselves, so **the transport is untrusted**: a reply is only dat
 
 An identity lists a node's mailbox as a distribution point: `mailto:chains@node.example` (in `set_distribution`).
 
+### Reading `mailto:` points
+
+* **Accepted form:** one plain address, nothing else (`mailto:chains@node.example`). No `?subject=&cc=` (RFC 6068 headers can smuggle in recipients and content), no display name, list, percent-escapes or
+  non-ASCII. `nodetide identity set-distribution` / `create` refuse anything else.
+* **CLI:** `nodetide mail fetch <identity_hash>` takes the node from the identity's newest `mailto:` point in the stored chain (`--to` overrides).
+* **Node:** the identity fetcher (sign-in of an unknown or newer identity) uses mail as a **last resort**: only after the HTTP sources did not satisfy the fetch, only for `mailto:` points in the identity's
+  own signed chain (never for hints that arrive with a sign-in page), at most 2 requests per attempt. The request is sent at once and the answer taken whenever the poller sees it (`MailFetchService`): it
+  has to be from the address asked, and is verified like any fetched chain before storing. Because we would be mailing addresses chosen by whoever published the chain, requests are rationed: one per
+  address per hour, 30 per hour in all, none while an answer to the same request is awaited, never to ourselves. `NODETIDE_MAIL_FETCH=0` turns it off.
+
 ## Requests
 
 Plain text, one command per line; everything else (greetings, signatures, quotes, HTML) is ignored. At most 5 commands per message; if the body has none, a command in the subject is used.

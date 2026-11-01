@@ -3,6 +3,12 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (mailto: distribution points)
+
+- **The CLI and the node read `mailto:` distribution points** (`email-distribution.md`, "Reading mailto: points"). A `mailto:` point is one plain address; anything with headers, names, lists or escapes is refused,
+  also when setting points (`nodetide identity set-distribution`). `nodetide mail fetch <hash>` finds the node itself. The node's identity fetcher asks by email as a last resort, non-blocking, only for points in the
+  identity's own signed chain, rationed (1 per address per hour, 30 per hour), and takes the answer when the shared mailbox poller sees it (`MailFetchService`, `reply_dispatcher`).
+
 ## 2026-11-02 (sigchains by email)
 
 - **Email as a distribution channel, read-only** (`nodetide.mailresponder`, `email-distribution.md`): a node can answer mail that asks for chains. Requests are lines `GET chain <hash> [light]

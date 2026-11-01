@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 
 from nodetide.core.storage import Storage
+from nodetide.mailresponder.fetch import MailFetchService, reply_dispatcher
 from nodetide.mailresponder.imap import ImapMailbox, Poller
 from nodetide.mailresponder.responder import Responder, ResponderConfig
 from nodetide.verifiers.mail import SMTPSender
@@ -54,7 +55,7 @@ def imap_from_env(prefix: str = "NODETIDE_MAIL_IMAP", max_bytes: int = 256 * 102
     )
 
 
-def build(storage: Storage) -> tuple[Responder, Poller]:
+def build(storage: Storage) -> tuple[Responder, Poller, MailFetchService]:
     address = os.environ.get("NODETIDE_MAIL_ADDRESS", "").strip()
     if not address:
         raise MailResponderConfigError("NODETIDE_MAIL_RESPONDER=1 needs NODETIDE_MAIL_ADDRESS")
@@ -64,7 +65,23 @@ def build(storage: Storage) -> tuple[Responder, Poller]:
         require_auth=os.environ.get("NODETIDE_MAIL_REQUIRE_AUTH", "1") != "0",
         trusted_servers=trusted or None,
     )
-    responder = Responder(storage, smtp_from_env(address, "NODETIDE_MAIL_SMTP"), config)
-    poller = Poller(imap_from_env(max_bytes=config.max_message_bytes), responder.handle,
+    sender = smtp_from_env(address, "NODETIDE_MAIL_SMTP")
+    responder = Responder(storage, sender, config)
+    # answers from other nodes (to our own requests) are bigger than requests: the mailbox lets them through, the responder
+    # still refuses oversized requests itself
+    fetch = MailFetchService(sender, address, deliver=_no_fetcher)
+    poller = Poller(imap_from_env(max_bytes=4 * 1024 * 1024), reply_dispatcher(responder, fetch),
                     interval=float(os.environ.get("NODETIDE_MAIL_POLL_SECONDS", "30")))
-    return responder, poller
+    return responder, poller, fetch
+
+
+async def _no_fetcher(identity_hash, events) -> None:
+    """Until the identity fetcher is attached (attach_fetcher)."""
+
+
+def attach_fetcher(fetch: MailFetchService, fetcher) -> None:
+    """Connect the node's identity fetcher: it asks by email as a last resort, and takes the answers."""
+    if os.environ.get("NODETIDE_MAIL_FETCH", "1") == "0":
+        return
+    fetch.deliver = fetcher.deliver
+    fetcher.mail = fetch

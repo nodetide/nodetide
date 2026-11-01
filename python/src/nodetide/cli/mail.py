@@ -17,26 +17,39 @@ def mail():
 
 @mail.command("fetch")
 @click.argument("identity_hash")
-@click.option("--to", "node_address", required=True, help="The node's mailbox, as listed in its mailto: distribution point")
+@click.option("--to", "node_address", help="The node's mailbox. Default: the mailto: distribution point of the identity (it must be stored already)")
 @click.option("--from", "from_address", envvar="NODETIDE_MAIL_FROM", required=True, help="Your own mailbox (replies come here)")
 @click.option("--light", is_flag=True, help="Control chain only; shown, not stored")
 @click.option("--timeout", type=int, default=600, show_default=True, help="Seconds to wait for the reply")
-def fetch(identity_hash: str, node_address: str, from_address: str, light: bool, timeout: int):
+def fetch(identity_hash: str, node_address: str | None, from_address: str, light: bool, timeout: int):
     """Ask NODE for IDENTITY_HASH's sigchain, verify it, and store it.
 
     Sends through NODETIDE_SMTP_* and reads the reply from NODETIDE_MAIL_CLIENT_IMAP_* (host, port, user, password, security).
-    If the identity is already stored, only what is new is requested.
+    If the identity is already stored, only what is new is requested, and the node is the one the identity names in a
+    `mailto:` distribution point (unless --to says otherwise).
     """
     from nodetide.cli.main import get_storage
+    from nodetide.mailresponder.addresses import mail_points, mailto_address
     from nodetide.mailresponder.config import MailResponderConfigError, imap_from_env, smtp_from_env
 
+    storage = get_storage()
+    have = storage.get_sigchain(identity_hash)
+    if node_address is None:
+        points: list = []
+        for event in (have.events if have else []):
+            points = getattr(event, "distribution_points", None) or points
+        found = mail_points(points)
+        if not found:
+            raise click.ClickException("no mailto: distribution point known for this identity; give the node's mailbox with --to")
+        node_address = found[0]
+        click.echo(f"Asking {node_address} (from the identity's distribution points)")
+    elif mailto_address("mailto:" + node_address) is None:
+        raise click.ClickException(f"{node_address!r} is not a plain mailbox address")
     try:
         client = MailClient(smtp_from_env(from_address), imap_from_env("NODETIDE_MAIL_CLIENT_IMAP"), from_address, node_address)
     except MailResponderConfigError as e:
         raise click.ClickException(str(e))
-    storage = get_storage()
-    have = storage.get_sigchain(identity_hash)
-    click.echo("Request sent; waiting for the reply (this can take a few minutes)...")
+    click.echo("Sending the request and waiting for the reply (this can take a few minutes)...")
     try:
         chain = asyncio.run(client.fetch_chain(identity_hash, have=have, light=light, timeout=timeout))
     except MailFetchError as e:

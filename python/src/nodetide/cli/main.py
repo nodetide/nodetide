@@ -19,6 +19,15 @@ from nodetide.core.trust import (
 from nodetide.content.mime import create_text_message
 
 
+def checked_points(points: tuple[str, ...]) -> list[str]:
+    """Distribution points as given, but a mailto: one must be a plain address (what readers will accept)."""
+    from nodetide.mailresponder.addresses import mailto_address
+    for point in points:
+        if point.strip()[:7].lower() == "mailto:" and mailto_address(point) is None:
+            raise click.BadParameter(f"{point!r}: use a single plain address, like mailto:chains@node.example (no ?subject=, name or list)")
+    return list(points)
+
+
 def data_dir() -> Path:
     """Where the CLI keeps its database: $NODETIDE_HOME, else ~/.nodetide."""
     return Path(os.environ["NODETIDE_HOME"]) if os.environ.get("NODETIDE_HOME") else Path.home() / ".nodetide"
@@ -73,7 +82,7 @@ def identity_create(name: str | None, identity_type: str, distribution: tuple[st
     storage = get_storage()
 
     id_type = IdentityType(identity_type)
-    dist_points = list(distribution) if distribution else None
+    dist_points = checked_points(distribution) if distribution else None
     ident = Identity.create(identity_type=id_type, name=name, distribution_points=dist_points)
 
     # Save to storage
@@ -231,7 +240,7 @@ def identity_set_distribution(distribution: tuple[str, ...]):
         click.echo("No default identity. Create one with: nodetide identity create")
         return
 
-    dist_points = list(distribution)
+    dist_points = checked_points(distribution)
     event = ident.set_distribution_points(dist_points)
 
     storage.save_sigchain(ident.sigchain)
