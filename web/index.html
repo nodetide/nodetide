@@ -1234,6 +1234,7 @@
               </div>
               <div class="flex gap-1" style="margin-top: 0.3rem; flex-wrap: wrap">
                 <button class="btn btn-small btn-secondary" @click="toggle(c.id)" x-text="open[c.id] ? 'Hide timeline' : 'Timeline'"></button>
+                <button class="btn btn-small btn-secondary" x-show="c.verified && !c.renounced && !c.published" @click="publish(c.id)" :disabled="$store.app.loading">Publish attestation</button>
                 <button class="btn btn-small btn-secondary" x-show="!c.renounced" @click="renounce(c.id)" :disabled="$store.app.loading">Renounce</button>
               </div>
               <div x-show="!c.verified && c.codeable" class="flex gap-1" style="margin-top: 0.4rem; flex-wrap: wrap">

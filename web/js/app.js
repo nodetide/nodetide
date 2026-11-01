@@ -1157,6 +1157,31 @@
       await this.save(hash);
     },
 
+    async publishAttestation(hash, claimId) {
+      /**
+       * Put a verified claim's attestation on the node, where the explorer and anyone can see it. It reveals that this
+       * identity holds an attested claim of that type and who attested it; the value is not in it and stays private.
+       */
+      const s = this.session(hash);
+      const doc = s.data.claims[claimId];
+      if (!doc || doc.renounced_at) throw new Error('Unknown or renounced claim');
+      const atts = s.data.attestations.filter(a => a.claim_id === claimId);
+      if (!atts.length) throw new Error('This claim has no attestation yet');
+      const { events } = await this.chain(hash);
+      let published = 0;
+      for (const att of atts) {
+        const issuer = s.data.issuer_chains[att.issuer];
+        await api.request('POST', '/attestations', {
+          attestation: att, subject_sigchain: events, ...(issuer ? { issuer_sigchain: issuer.sigchain } : {}),
+        });
+        published += 1;
+      }
+      doc.published_at = Math.floor(Date.now() / 1000);
+      this.note(s, claimId, 'published', `Attestation published on the node (public: anyone can see that this claim is attested, not its value)`);
+      await this.save(hash);
+      return published;
+    },
+
     async timeline(hash, claimId) {
       /** Everything known about one claim, oldest first, and the raw material behind it. */
       const s = this.session(hash);
@@ -1789,7 +1814,7 @@
           const att = s.data.attestations.find(a => a.claim_id === doc.claim_id);
           const pending = s.data.verifications[doc.claim_id];
           return {
-            id: doc.claim_id, type: doc.claim_type, renounced: !!doc.renounced_at, renouncedAt: doc.renounced_at || null,
+            id: doc.claim_id, type: doc.claim_type, published: !!doc.published_at, renounced: !!doc.renounced_at, renouncedAt: doc.renounced_at || null,
             value: typeof doc.value === 'string' ? doc.value : Object.values(doc.value).join(' '),
             verified: !!att, method: att ? att.method : null, assurance: att ? att.assurance : null,
             issuer: att ? (s.data.issuer_chains[att.issuer] && s.data.issuer_chains[att.issuer].name) || att.issuer.slice(0, 12) : null,
@@ -1838,6 +1863,12 @@
         const value = this.phone;
         await this.run('add', async () => { await Wallet.addClaim(this.hash, 'phone', value); this.phone = ''; }, 'Phone claim added. Verify it below.');
       },
+      async publish(id) {
+        const claim = this.claims.find(c => c.id === id);
+        if (!window.confirm(`Publish the attestation of your ${claim.type} on the node? Anyone can then see, for example in the explorer, that this identity has a ${claim.type} verified by ${claim.issuer}. The ${claim.type} itself stays private.`)) return;
+        await this.run(id, async () => { await Wallet.publishAttestation(this.hash, id); await this.loadDetails(id); }, 'Attestation published.');
+      },
+
       async renounce(id) {
         const claim = this.claims.find(c => c.id === id);
         if (!window.confirm(`Renounce the ${claim.type} ${claim.value}? ${claim.verified ? 'Its verification stops counting. ' : ''}This is recorded on your identity's chain. The claim is hidden, not forgotten: you can still read its timeline.`)) return;

@@ -182,6 +182,23 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                     assert r.status == 200  # the explorer really knows the event the link points to
                     assert (await r.json())["event_type"] == "add_claim" if "event_type" in (await r.json()) else True
 
+                # publishing the attestation makes it reachable in the explorer: about the holder, and issued by the verifier
+                async with http.get(f"{base}/api/explorer/attestations?subject={identity}") as r:
+                    assert (await r.json())["total"] == 0  # nothing public until the holder chooses
+                await page.js("window.confirm = () => true")
+                assert await attempt(f"await {wallet}.publish({json.dumps(claim_id)});") is None
+                async with http.get(f"{base}/api/explorer/attestations?subject={identity}") as r:
+                    listed = (await r.json())["items"]
+                assert len(listed) == 1 and listed[0]["claim_type"] == "email" and "alice" not in json.dumps(listed).lower()
+                issuer_hash = listed[0]["issuer"]
+                async with http.get(f"{base}/api/explorer/attestations?issuer={issuer_hash}") as r:
+                    assert (await r.json())["total"] == 1
+                async with http.get(f"{base}/api/explorer/identities/{identity}") as r:
+                    assert (await r.json())["counts"]["attestations_about"] == 1
+                tl = await page.js(f"(async()=>{{await {wallet}.loadDetails({json.dumps(claim_id)}); return JSON.parse(JSON.stringify({wallet}.details[{json.dumps(claim_id)}]))}})()")
+                assert any("published on the node" in e["label"] for e in tl["entries"])
+                assert (await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))"))[0]["published"] is True
+
                 # the web client's device now carries real capabilities
                 async with http.get(f"{base}/api/identities/{identity}") as r:
                     info = await r.json()

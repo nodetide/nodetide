@@ -214,6 +214,8 @@ class Explorer:
                 "delegations_to": self._count(
                     "SELECT COUNT(*) FROM trust_delegations WHERE to_identity = ?", [identity_hash]
                 ),
+                "attestations_about": self._count("SELECT COUNT(*) FROM attestations WHERE subject = ?", [identity_hash]),
+                "attestations_issued": self._count("SELECT COUNT(*) FROM attestations WHERE issuer = ?", [identity_hash]),
             },
             "relay": relay,
         }

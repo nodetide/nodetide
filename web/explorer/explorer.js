@@ -440,6 +440,8 @@
         h('h2', null, 'Activity'),
         h('div', { class: 'grid' },
           statCard('Public messages', c.public_messages, c.public_messages ? route('/messages', { sender: hash }) : null),
+          statCard('Attestations about it', c.attestations_about, c.attestations_about ? route('/attestations', { subject: hash }) : null),
+          statCard('Attestations it issued', c.attestations_issued, c.attestations_issued ? route('/attestations', { issuer: hash }) : null),
           statCard('Trusts as attester', c.delegations_from, c.delegations_from ? route('/trust', { from: hash }) : null),
           statCard('Trusted by', c.delegations_to, c.delegations_to ? route('/trust', { to: hash }) : null)
         ),
