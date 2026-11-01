@@ -3,6 +3,17 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Android accounts and key storage)
+
+- **Several accounts on one phone** (`AccountBook`, `AccountsScreen`): switch from the top bar, add (create, attach a device, watch), remove with a warning. The screens read "the current identity",
+  which is the active account. Rules unit-tested on the JVM.
+- **Keys encrypted with the Android Keystore**: the whole account book (secret keys, chain cache) is sealed with AES-256-GCM (`SecretBox`/`AesGcmBox`, format `[1][12-byte IV][ciphertext+tag]`, the
+  storage name as authenticated context) under a non-exportable Keystore key (`KeystoreKey`: StrongBox when the phone has it, usable only while unlocked, with step-by-step fallback). Data the key
+  cannot open (restored phone, tampering) is a *problem*, never "no accounts": nothing is written over it, the Accounts screen says so, and the user decides whether to discard it.
+  A plaintext store left by an earlier development build is sealed and deleted at start. `allowBackup` is off, so Android's backup does not carry the keys.
+  The sealing code is pure Kotlin and unit-tested (round trip, tampering, wrong key and context, fresh IV, nothing readable in what is stored, unreadable != empty); the Keystore key itself is
+  only exercised on a device.
+
 ## 2026-11-02 (Android) - a working, publishable Android build on the current protocol
 
 - **The build works again** (every CI run since May had failed): Gradle 9.8.2, AGP 9.5 (built-in Kotlin), Kotlin 2.4.21 with the Compose compiler plugin, compile SDK 37 (the current
