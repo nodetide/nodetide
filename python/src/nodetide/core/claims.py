@@ -497,16 +497,27 @@ class Check:
         return cls(False, code, error)
 
 
-def issuer_key_check(issuer_chain: Sigchain, issuer: str, signed_by: str, now: int) -> Check:
-    """The signing key must be an active, non-master device of the issuer with sign_identity."""
+def issuer_key_check(issuer_chain: Sigchain, issuer: str, signed_by: str, now: int, issued_at: int | None = None) -> Check:
+    """The signing key must be a non-master device of the issuer with sign_identity, valid for what it signed.
+
+    A revoked device is out, unless it was revoked with `untrusted_since` T and this was issued before T: an honest
+    attestation made before a compromise survives the replacement of the keys. (`issued_at` is the signer's own date,
+    so T is the owners' judgment and not a proof.)
+    """
     if issuer_chain.identity_hash != issuer:
         return Check.fail("issuer_mismatch", "Issuer chain does not match the issuer")
     if signed_by == issuer_chain.get_current_master_key():
         return Check.fail("issuer_key_not_authorized", "The master key may not sign attestations")
-    device = next((d for d in issuer_chain.get_active_devices(now) if d.pubkey == signed_by), None)
-    if device is None:
+    status = issuer_chain.device_status(signed_by)
+    if not status["known"]:
         return Check.fail("issuer_key_not_authorized", "Signing key is not an active device of the issuer")
-    if DeviceCapability.SIGN_IDENTITY.value not in device.capabilities:
+    if status["revoked"]:
+        since = status["untrusted_since"]
+        if since is None or issued_at is None or issued_at >= since:
+            return Check.fail("issuer_key_not_authorized", "Signing key was revoked")
+    elif status["expires"] and status["expires"] < now:
+        return Check.fail("issuer_key_not_authorized", "Signing key is not an active device of the issuer")
+    if DeviceCapability.SIGN_IDENTITY.value not in status["capabilities"]:
         return Check.fail("issuer_key_not_authorized", "Signing key lacks the sign_identity capability")
     return Check(True)
 
@@ -578,7 +589,7 @@ def verify_attestation(
     if not valid:
         return Check.fail("invalid_sigchain", err or "Invalid issuer sigchain")
     assert att.issuer and att.signed_by and att.sig
-    key_check = issuer_key_check(issuer_chain, att.issuer, att.signed_by, now)
+    key_check = issuer_key_check(issuer_chain, att.issuer, att.signed_by, now, att.issued_at)
     if not key_check.ok:
         return key_check
     if not _verify_sig(att.signed_by, att.signing_input(), att.sig):
@@ -594,7 +605,7 @@ def verify_revocation(
     valid, err = issuer_chain.verify(resolve)
     if not valid:
         return Check.fail("invalid_sigchain", err or "Invalid issuer sigchain")
-    key_check = issuer_key_check(issuer_chain, rev.issuer, rev.signed_by, now)
+    key_check = issuer_key_check(issuer_chain, rev.issuer, rev.signed_by, now, rev.issued_at)
     if not key_check.ok:
         return key_check
     if not _verify_sig(rev.signed_by, rev.signing_input(), rev.sig):

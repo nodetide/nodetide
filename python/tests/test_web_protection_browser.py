@@ -20,7 +20,7 @@ from nodetide.api.app import create_app
 from nodetide.core.crypto import KeyPair
 from nodetide.core.identity import Identity, Sigchain, SocialRecoveryEvent, sign_recovery
 from nodetide.core.storage import Storage as VerifierStorage
-from nodetide.verifiers.issuer import IssuerNotReady, founding_request, load_owned
+from nodetide.verifiers.issuer import IssuerNotReady, discover_org, founding_request, load_owned
 from nodetide.core.storage import Storage
 
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -243,8 +243,8 @@ async def test_banner_backup_recovery_and_restore():
                 verifier_db = VerifierStorage.memory()
                 founding = founding_request(verifier_db, "Test verifier", browser_trustee)
 
-                def approve_form(request, password="trustee-pass-12"):
-                    form = {"password": password, "request": request, "result": None}
+                def approve_form(request, password="trustee-pass-12", since=""):
+                    form = {"password": password, "request": request, "result": None, "since": since}
                     return attempt(f"const c={lost}; c.org={json.dumps(form)}; await c.approveOrganization();")
 
                 assert "Invalid identity password" in await approve_form(json.dumps(founding), "wrong")
@@ -273,6 +273,41 @@ async def test_banner_backup_recovery_and_restore():
                 async with http.get(f"{base}/api/identities/{org_hash}") as r:
                     org_info = await r.json()
                 assert org_info["verified"] is True and len(org_info["devices"]) == 2
+
+                # --- the verifier installation is compromised: a clean one asks to take over, the owners approve ------------
+                db_b = VerifierStorage.memory()
+                replace_request = founding_request(db_b, "Test verifier", None, replace=org_hash)
+                assert replace_request["kind"] == "replace" and replace_request["organization"] == org_hash
+                async with http.get(f"{base}/api/identities/{org_hash}") as r:
+                    old_devices = [d["pubkey"] for d in (await r.json())["devices"]]
+                assert len(old_devices) == 2                                           # the org's key and the old signing device
+
+                assert await page.js(f"(()=>{{{lost}.org.request={json.dumps(json.dumps(replace_request))}; return {lost}.replacing}})()") is True
+                # an organization this identity does not own is refused
+                other = json.loads(json.dumps(replace_request)); other["organization"] = friend.identity_hash
+                assert "not an owner" in await approve_form(json.dumps(other))
+                assert "future" in await approve_form(json.dumps(replace_request), since="2099-01-01T00:00")
+                since = await page.js("Math.floor(new Date('2026-11-01T08:00').getTime()/1000)")
+                assert await approve_form(json.dumps(replace_request), since="2026-11-01T08:00") is None
+                async with http.get(f"{base}/api/identities/{org_hash}/sigchain?light=1") as r:
+                    events = (await r.json())["events"]
+                rotation = events[-1]
+                assert rotation["type"] == "rotate_master" and rotation["signed_by"] == "owners"
+                assert rotation["new_pubkey"] == replace_request["new_pubkey"]
+                assert rotation["revoke_devices"] == "all" and rotation["untrusted_since"] == since
+                async with http.get(f"{base}/api/identities/{org_hash}") as r:
+                    after = await r.json()
+                assert after["verified"] is True and after["devices"] == [] and after["master_pubkey"] == replace_request["new_pubkey"]
+
+                # the clean installation notices and takes over; the old one is cut off
+                took_over = await asyncio.to_thread(discover_org, db_b, base)
+                assert took_over == org_hash
+                new_issuer = await asyncio.to_thread(load_owned, db_b, "Test verifier", None, base, None, None, org_hash)
+                assert new_issuer.identity_hash == org_hash
+                async with http.get(f"{base}/api/identities/{org_hash}") as r:
+                    assert len((await r.json())["devices"]) == 1                        # only the new installation's signing device
+                with pytest.raises(IssuerNotReady, match="replaced it"):
+                    await asyncio.to_thread(load_owned, verifier_db, "Test verifier", org_hash, base, browser_trustee)
 
                 # --- a managed organization: here the owners authorize the verifier's signing key ----------------------
                 managed_db = VerifierStorage.memory()

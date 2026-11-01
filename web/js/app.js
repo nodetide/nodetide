@@ -562,7 +562,53 @@
       };
     },
 
-    async approveOrganization(ownerHash, ownerPassword, requestText) {
+    async approveReplacement(ownerHash, ownerPassword, request, sinceSeconds) {
+      /**
+       * Approve rotating an existing organization to a NEW key made by a fresh installation (the old one being lost or
+       * compromised), revoking every device the old key authorized in the same step. `sinceSeconds` is the time from which
+       * what those devices signed is untrusted (empty: nothing they ever signed counts). With several owners each approves
+       * in turn and passes the proposal on; the node accepts it once more than half of the weight has.
+       */
+      const owner = this.getIdentity(ownerHash);
+      if (!owner || !owner.encryptedMasterKeys) throw new Error('This browser does not hold the owner identity\'s master key');
+      const orgHash = request.organization || (request.proposal && request.proposal.organization);
+      if (!/^[0-9a-f]{64}$/.test(orgHash || '')) throw new Error('The request does not name an organization');
+      const info = await api.getIdentity(orgHash);
+      const control = (info.sigchain || []).filter(e => !CONTENT_TYPES.includes(e.type));
+      let owners = null;
+      for (const e of control) if ((e.type === 'genesis' || e.type === 'set_owners') && e.owners) owners = e.owners;
+      if (!owners || !owners.some(o => o.identity === ownerHash)) throw new Error('The active identity is not an owner of that organization');
+      const head = await sha256(canonicalize(control[control.length - 1]));
+
+      let event;
+      if (request.proposal) {
+        event = request.proposal.event;
+        if (event.prev !== head) throw new Error('The organization changed since this proposal was made: start again');
+      } else {
+        if (request.kind !== 'replace' || !/^[0-9a-f]{64}$/.test(request.new_pubkey || '')) throw new Error('That is not a replacement request');
+        const now = Math.floor(Date.now() / 1000);
+        if (sinceSeconds && sinceSeconds > now) throw new Error('The untrusted-since time cannot be in the future');
+        event = {
+          version: 1, type: 'rotate_master', alg: 'ed25519', hash_alg: 'sha256', timestamp: now, prev: head,
+          signed_by: 'owners', signature: '', new_pubkey: request.new_pubkey,
+          new_encryption_pubkey: request.new_encryption_pubkey, revoke_devices: 'all',
+          ...(sinceSeconds ? { untrusted_since: sinceSeconds } : {}),
+        };
+      }
+      const { master } = await this._unlockBoth(owner, ownerPassword);
+      const approval = await this._ownerApproval(owner, master, event);
+      event.approvals = [...(event.approvals || []).filter(a => a.identity !== ownerHash), approval];
+      const weights = Object.fromEntries(owners.map(o => [o.identity, o.weight]));
+      const total = owners.reduce((n, o) => n + o.weight, 0);
+      const approved = event.approvals.reduce((n, a) => n + (weights[a.identity] || 0), 0);
+      if (2 * approved <= total) {
+        return { kind: 'replace', complete: false, orgHash, name: info.name, approved, total, proposal: { organization: orgHash, event } };
+      }
+      await api.submitEvent(orgHash, event);
+      return { kind: 'replace', complete: true, orgHash, name: info.name, approved, total };
+    },
+
+    async approveOrganization(ownerHash, ownerPassword, requestText, sinceText) {
       /**
        * Approve the founding of an organization this identity owns. The request is the genesis the organization's own
        * key (held by the verifier) has already signed. Every owner must approve it; a partly approved genesis is
@@ -572,6 +618,11 @@
       if (!owner || !owner.encryptedMasterKeys) throw new Error('This browser does not hold the owner identity\'s master key');
       let request;
       try { request = JSON.parse(requestText); } catch { throw new Error('Paste the JSON the verifier shows at /api/issuer/request'); }
+      if (request.kind === 'replace' || request.proposal) {
+        const since = sinceText ? Math.floor(new Date(sinceText).getTime() / 1000) : null;
+        if (sinceText && !(since > 0)) throw new Error('That is not a date and time');
+        return this.approveReplacement(ownerHash, ownerPassword, request, since);
+      }
       const genesis = request.genesis || request;
       if (genesis.type !== 'genesis' || genesis.identity_type !== 'organization' || !Array.isArray(genesis.owners)) {
         throw new Error('That is not the founding request of an organization');
@@ -2106,7 +2157,11 @@
       },
 
       // Organizations owned by this identity
-      org: { password: '', request: '', result: null, service: '' },
+      org: { password: '', request: '', result: null, service: '', since: '' },
+
+      get replacing() {
+        try { const r = JSON.parse(this.org.request); return r.kind === 'replace' || !!r.proposal; } catch { return false; }
+      },
       dev: { password: '', orgHash: '', request: '' },
 
       orgs: [],
@@ -2141,11 +2196,13 @@
         Alpine.store('app').loading = true;
         try {
           this.org.result = await KeyStore.approveOrganization(
-            Alpine.store('identity').activeHash, this.org.password, this.org.request);
+            Alpine.store('identity').activeHash, this.org.password, this.org.request, this.org.since);
           this.org.password = '';
           this.loadOrgs();
+          const replaced = this.org.result.kind === 'replace';
           Alpine.store('app').showSuccess(this.org.result.complete
-            ? 'The organization is founded.' : 'Approved. Pass the result on to the next owner.');
+            ? (replaced ? 'The organization now has the new key; the old devices are revoked.' : 'The organization is founded.')
+            : 'Approved. Pass the result on to the next owner.');
         } catch (e) {
           Alpine.store('app').showError('Could not do that: ' + e.message);
         } finally {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from typing import Any
 
@@ -115,10 +116,22 @@ def parse_owners(text: str | None) -> list[dict[str, Any]]:
 
 
 def _owned_row(
-    storage: Storage, name: str, owners_text: str | None, governance: str | None = None
+    storage: Storage, name: str, owners_text: str | None, governance: str | None = None, replace: str | None = None
 ) -> dict[str, Any]:
-    """The keys and the (not yet approved) genesis of this issuer, made once and kept."""
+    """The keys and the (not yet approved) genesis of this issuer, made once and kept.
+
+    With `replace` (the hash of an existing organization) this is a fresh installation that takes over from one whose
+    key is gone or compromised: it makes new keys but no genesis, and asks the organization's owners to rotate to them.
+    """
     row = storage.get_owned_issuer()
+    if row is None and replace:
+        if not re.fullmatch(r"[0-9a-f]{64}", replace):
+            raise IssuerNotReady("NODETIDE_ISSUER_REPLACE is the 64-hex hash of the organization to take over")
+        master, device = KeyPair.generate(), KeyPair.generate()
+        storage.save_owned_issuer(
+            json.dumps(master.to_dict()), json.dumps(device.to_dict()), json.dumps({"replace": replace})
+        )
+        row = storage.get_owned_issuer()
     if row is None:
         owners = parse_owners(owners_text)
         if governance not in (None, "", "self", "managed"):
@@ -136,16 +149,30 @@ def _owned_row(
 
 
 def founding_request(
-    storage: Storage, name: str, owners_text: str | None, governance: str | None = None
+    storage: Storage, name: str, owners_text: str | None, governance: str | None = None, replace: str | None = None
 ) -> dict[str, Any]:
     """What the owners approve to found the organization: the genesis, signed by the organization's own key.
 
     Also the signing device's public data: in a "managed" organization the owners authorize that key themselves.
     """
-    row = _owned_row(storage, name, owners_text, governance)
+    row = _owned_row(storage, name, owners_text, governance, replace)
     genesis = json.loads(row["genesis_json"])
     device = KeyPair.from_dict(json.loads(row["device_keys"]))
+    device_data = {
+        "device_pubkey": device.verify_key.to_hex(),
+        "device_encryption_pubkey": device.public_encryption_key.to_hex(),
+        "label": "attestation signer",
+        "capabilities": ISSUER_CAPABILITIES,
+    }
+    if "replace" in genesis:
+        master = KeyPair.from_dict(json.loads(row["master_keys"]))
+        return {
+            "kind": "replace", "name": name, "organization": genesis["replace"],
+            "new_pubkey": master.verify_key.to_hex(), "new_encryption_pubkey": master.public_encryption_key.to_hex(),
+            "device": device_data,
+        }
     return {
+        "kind": "found",
         "name": name, "genesis": genesis, "owners": genesis["owners"], "governance": genesis.get("governance", "self"),
         "device": {
             "device_pubkey": device.verify_key.to_hex(),
@@ -176,7 +203,13 @@ def discover_org(storage: Storage, node_url: str) -> str | None:
     row = storage.get_owned_issuer()
     if row is None:
         return None
-    ours = {k: v for k, v in json.loads(row["genesis_json"]).items() if k not in ("signature", "approvals")}
+    declared = json.loads(row["genesis_json"])
+    if "replace" in declared:
+        # a replacement is done when the organization's current key is the one this installation made
+        master = KeyPair.from_dict(json.loads(row["master_keys"]))
+        light = Sigchain.from_list(_http_json(f"{node_url.rstrip('/')}/api/identities/{declared['replace']}/sigchain?light=1")["events"])
+        return declared["replace"] if light.get_current_master_key() == master.verify_key.to_hex() else None
+    ours = {k: v for k, v in declared.items() if k not in ("signature", "approvals")}
     listing = _http_json(f"{node_url.rstrip('/')}/api/identities").get("identities", [])
     for item in listing[:500]:
         if item.get("type") != "organization":
@@ -193,7 +226,7 @@ def discover_org(storage: Storage, node_url: str) -> str | None:
 
 def load_owned(
     storage: Storage, name: str, org_hash: str | None, node_url: str | None, owners_text: str | None = None,
-    governance: str | None = None,
+    governance: str | None = None, replace: str | None = None,
 ) -> NodeIssuer:
     """The issuer for the organization its owners founded. Raises IssuerNotReady until that is the case.
 
@@ -201,7 +234,11 @@ def load_owned(
     passes is kept in storage so the verifier can serve it. If the chain does not yet list our signing device, the
     organization's own key adds it (an ordinary event, no owner needed) and the node is told.
     """
-    row = _owned_row(storage, name, owners_text, governance)
+    row = _owned_row(storage, name, owners_text, governance, replace)
+    declared = json.loads(row["genesis_json"])
+    replacing = "replace" in declared
+    if replacing:
+        org_hash = declared["replace"]
     org_hash = org_hash or storage.get_issuer_org()
     if not org_hash and node_url:
         try:
@@ -236,9 +273,12 @@ def load_owned(
     if not ok:
         raise IssuerNotReady(f"the organization's chain does not verify: {err}")
     if chain.get_current_master_key() != master.verify_key.to_hex():
+        if replacing:
+            raise IssuerNotReady("waiting for the organization's owners to approve this installation as its new key")
         raise IssuerNotReady(
-            "the organization's key is no longer the one this server holds (its owners replaced it); "
-            "this server needs the new key before it can act for the organization again"
+            "the organization's key is no longer the one this installation holds: its owners replaced it. "
+            "This installation is not its issuer any more; to take over again, set up a fresh one "
+            "(NODETIDE_ISSUER_REPLACE) and have the owners approve it"
         )
 
     device_pub = device.verify_key.to_hex()

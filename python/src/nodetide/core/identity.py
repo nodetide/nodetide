@@ -7,6 +7,7 @@ Sigchain = append-only log of signed events
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -346,6 +347,10 @@ class RevokeDeviceEvent(SigchainEvent):
 
     device_pubkey: str
     reason: str | None = None
+    # Untrusted from this time on: what the device signed BEFORE it (an honest attestation) still counts, what it signed
+    # after does not. Absent = nothing it ever signed counts. The signer's own dates can be forged, so this is a decision of
+    # whoever revokes, not a proof of when a compromise began.
+    untrusted_since: int | None = None
 
     def __post_init__(self):
         self.type = EventType.REVOKE_DEVICE
@@ -356,6 +361,8 @@ class RevokeDeviceEvent(SigchainEvent):
             "device_pubkey": self.device_pubkey,
             "reason": self.reason,
         })
+        if self.untrusted_since is not None:
+            d["untrusted_since"] = self.untrusted_since
         return d
 
     @classmethod
@@ -371,6 +378,7 @@ class RevokeDeviceEvent(SigchainEvent):
             hash_alg=data.get("hash_alg", DEFAULT_HASH_ALG),
             device_pubkey=data["device_pubkey"],
             reason=data.get("reason"),
+            untrusted_since=data.get("untrusted_since"),
         )
 
     @classmethod
@@ -381,6 +389,7 @@ class RevokeDeviceEvent(SigchainEvent):
         prev_hash: str,
         reason: str | None = None,
         content: dict | None = None,
+        untrusted_since: int | None = None,
     ) -> RevokeDeviceEvent:
         """Create and sign a revoke device event."""
         event = cls(
@@ -392,6 +401,7 @@ class RevokeDeviceEvent(SigchainEvent):
             signed_by=master_keypair.verify_key.to_hex(),
             device_pubkey=device_pubkey,
             reason=reason,
+            untrusted_since=untrusted_since,
         )
         signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
         event.signature = master_keypair.sign_hex(signable.encode("utf-8"))
@@ -404,6 +414,10 @@ class RotateMasterEvent(SigchainEvent):
 
     new_pubkey: str
     new_encryption_pubkey: str
+    # Devices this rotation revokes in the same step: "all" (every device authorized so far) or a list of device keys.
+    # A key taken over by an attacker leaves its devices behind when only the master changes; this closes that window.
+    revoke_devices: list[str] | str | None = None
+    untrusted_since: int | None = None  # as in RevokeDeviceEvent, for the devices revoked here
 
     def __post_init__(self):
         self.type = EventType.ROTATE_MASTER
@@ -414,6 +428,10 @@ class RotateMasterEvent(SigchainEvent):
             "new_pubkey": self.new_pubkey,
             "new_encryption_pubkey": self.new_encryption_pubkey,
         })
+        if self.revoke_devices is not None:
+            d["revoke_devices"] = self.revoke_devices
+        if self.untrusted_since is not None:
+            d["untrusted_since"] = self.untrusted_since
         return d
 
     @classmethod
@@ -429,6 +447,8 @@ class RotateMasterEvent(SigchainEvent):
             hash_alg=data.get("hash_alg", DEFAULT_HASH_ALG),
             new_pubkey=data["new_pubkey"],
             new_encryption_pubkey=data["new_encryption_pubkey"],
+            revoke_devices=data.get("revoke_devices"),
+            untrusted_since=data.get("untrusted_since"),
         )
 
     @classmethod
@@ -438,6 +458,8 @@ class RotateMasterEvent(SigchainEvent):
         new_keypair: KeyPair,
         prev_hash: str,
         content: dict | None = None,
+        revoke_devices: list[str] | str | None = None,
+        untrusted_since: int | None = None,
     ) -> RotateMasterEvent:
         """Create and sign a master key rotation event."""
         event = cls(
@@ -449,6 +471,8 @@ class RotateMasterEvent(SigchainEvent):
             signed_by=old_keypair.verify_key.to_hex(),
             new_pubkey=new_keypair.verify_key.to_hex(),
             new_encryption_pubkey=new_keypair.public_encryption_key.to_hex(),
+            revoke_devices=revoke_devices,
+            untrusted_since=untrusted_since,
         )
         signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
         event.signature = old_keypair.sign_hex(signable.encode("utf-8"))
@@ -1011,6 +1035,35 @@ GOVERNANCE_MODES = ("self", "managed")
 ChainResolver = Callable[[str], "Sigchain | None"]
 
 
+def revoked_by(event: SigchainEvent, known_devices: Any) -> dict[str, int | None]:
+    """Devices an event revokes, as {device key: untrusted_since or None}. `known_devices` are the keys authorized so far."""
+    if isinstance(event, RevokeDeviceEvent):
+        return {event.device_pubkey: event.untrusted_since}
+    if isinstance(event, RotateMasterEvent) and event.revoke_devices is not None:
+        keys = list(known_devices) if event.revoke_devices == "all" else list(event.revoke_devices)
+        return {k: event.untrusted_since for k in keys}
+    return {}
+
+
+def check_revocation_fields(event: SigchainEvent) -> str | None:
+    """Why the revocation fields of a revoke_device or rotate_master are unusable, or None."""
+    since = getattr(event, "untrusted_since", None)
+    if since is not None:
+        if isinstance(since, bool) or not isinstance(since, int) or since < 0:
+            return "untrusted_since is a time"
+        if since > event.timestamp:
+            return "untrusted_since cannot be in the future"
+    if isinstance(event, RotateMasterEvent):
+        rd = event.revoke_devices
+        if rd is None:
+            return "untrusted_since without devices to revoke" if since is not None else None
+        if rd != "all" and not (
+            isinstance(rd, list) and len(rd) <= 64 and all(isinstance(k, str) and re.fullmatch(r"[0-9a-f]{64}", k) for k in rd)
+        ):
+            return 'revoke_devices is "all" or a list of device keys'
+    return None
+
+
 def _canonical(obj: Any) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -1373,8 +1426,8 @@ class Sigchain:
                     added_at=event.timestamp,
                     expires=event.expires,
                 )
-            elif isinstance(event, RevokeDeviceEvent):
-                revoked.add(event.device_pubkey)
+            elif isinstance(event, (RevokeDeviceEvent, RotateMasterEvent)):
+                revoked.update(revoked_by(event, devices))
 
         # Filter out revoked and expired
         active = []
@@ -1541,8 +1594,15 @@ class Sigchain:
                 if isinstance(event, AddDeviceEvent):
                     devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
                 elif isinstance(event, RevokeDeviceEvent):
+                    err = check_revocation_fields(event)
+                    if err:
+                        return False, f"Event {i}: {err}"
                     revoked.add(event.device_pubkey)
                 elif isinstance(event, RotateMasterEvent):
+                    err = check_revocation_fields(event)
+                    if err:
+                        return False, f"Event {i}: {err}"
+                    revoked.update(revoked_by(event, {*devices, genesis.pubkey}))
                     current_master = event.new_pubkey
                 elif isinstance(event, SetOwnersEvent):
                     err = check_owner_list(event.owners, resolve)
@@ -1581,6 +1641,9 @@ class Sigchain:
                 if isinstance(event, AddDeviceEvent):
                     devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
                 elif isinstance(event, RevokeDeviceEvent):
+                    err = check_revocation_fields(event)
+                    if err:
+                        return False, f"Event {i}: {err}"
                     revoked.add(event.device_pubkey)
                 elif isinstance(event, SetRecoveryEvent):
                     err = check_recovery_config(event, self.identity_hash, resolve)
@@ -1607,6 +1670,10 @@ class Sigchain:
                 # Must be signed by old master
                 if event.signed_by != current_master:
                     return False, f"Event {i}: rotation must be signed by old master"
+                err = check_revocation_fields(event)
+                if err:
+                    return False, f"Event {i}: {err}"
+                revoked.update(revoked_by(event, {*devices, genesis.pubkey}))
                 current_master = event.new_pubkey
             elif isinstance(event, SocialRecoveryEvent):
                 err = check_recovery_event(
@@ -1646,8 +1713,33 @@ class Sigchain:
                 revoked.add(event.device_pubkey)
             elif isinstance(event, (RotateMasterEvent, SocialRecoveryEvent)):
                 master = event.new_pubkey
+                if isinstance(event, RotateMasterEvent):
+                    revoked.update(revoked_by(event, {*devices, *([self.events[0].pubkey] if self.events else [])}))
             states.append((master, dict(devices), set(revoked)))
         return states
+
+    def device_status(self, pubkey: str) -> dict[str, Any]:
+        """What the chain says about one device key: known, capabilities, revoked, and since when it is untrusted."""
+        caps: list[str] = []
+        expires: int | None = None
+        known = False
+        revoked = False
+        untrusted_since: int | None = None
+        authorized: set[str] = set()
+        for event in self.events:
+            if isinstance(event, GenesisEvent):
+                authorized.add(event.pubkey)
+                if event.pubkey == pubkey:
+                    known, caps = True, ["sign", "encrypt"]
+            elif isinstance(event, AddDeviceEvent):
+                authorized.add(event.device_pubkey)
+                if event.device_pubkey == pubkey:
+                    known, caps, expires, revoked, untrusted_since = True, list(event.capabilities or []), event.expires, False, None
+            elif isinstance(event, (RevokeDeviceEvent, RotateMasterEvent)):
+                gone = revoked_by(event, authorized)
+                if pubkey in gone:
+                    revoked, untrusted_since = True, gone[pubkey]
+        return {"known": known, "capabilities": caps, "expires": expires, "revoked": revoked, "untrusted_since": untrusted_since}
 
     @staticmethod
     def _may_manage_claims(state, signer: str, at: int) -> bool:

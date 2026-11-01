@@ -171,7 +171,8 @@ async def _watch_for_approval(app: web.Application) -> None:
         except Exception as e:  # the node may be down for a moment
             logger.info("looking for the organization: %s", e)
             continue
-        if found:
+        # (an organization that is already known and still did not let us in has replaced our key: nothing new to learn)
+        if found and found != storage.get_issuer_org():
             logger.warning("the owners approved: organization %s found, restarting to issue", found)
             storage.save_issuer_org(found)
             storage.close()
@@ -180,18 +181,18 @@ async def _watch_for_approval(app: web.Application) -> None:
 
 def run_pending(
     storage: Storage, name: str, owners: str | None, reason: str, host: str, port: int, governance: str | None = None,
-    node_url: str | None = None,
+    node_url: str | None = None, replace: str | None = None,
 ) -> None:
     """The issuer is owned but not founded yet: serve the founding request (and a clear 503 for the rest) until it is."""
     try:
-        body = founding_request(storage, name, owners, governance)
+        body = founding_request(storage, name, owners, governance, replace)
     except IssuerNotReady as e:
         body = {"name": name}
         reason = str(e)
     logger.warning("not issuing yet: %s", reason)
     logger.warning("founding request for the owners: %s", json.dumps(body))
     app = create_pending_app(body, reason)
-    if node_url and "genesis" in body:
+    if node_url and ("genesis" in body or body.get("kind") == "replace"):
         app["storage"], app["node_url"] = storage, node_url
 
         async def _start(a: web.Application) -> None:
@@ -226,11 +227,13 @@ def main() -> None:
             issuer = load_owned(
                 storage, issuer_name, os.environ.get("NODETIDE_ISSUER_ORG"), os.environ.get("NODETIDE_ISSUER_NODE"),
                 os.environ.get("NODETIDE_ISSUER_OWNERS"), os.environ.get("NODETIDE_ISSUER_GOVERNANCE"),
+                os.environ.get("NODETIDE_ISSUER_REPLACE") or None,
             )
         except IssuerNotReady as e:
             run_pending(
                 storage, issuer_name, os.environ.get("NODETIDE_ISSUER_OWNERS"), str(e), args.host, args.port,
                 os.environ.get("NODETIDE_ISSUER_GOVERNANCE"), os.environ.get("NODETIDE_ISSUER_NODE"),
+                os.environ.get("NODETIDE_ISSUER_REPLACE") or None,
             )
             return
     else:

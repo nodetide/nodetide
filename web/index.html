@@ -1115,6 +1115,21 @@
               <p class="text-small" x-show="org.service">Found a request from <strong x-text="org.service"></strong>. Check that you started this, then approve.</p>
               <textarea x-model="org.request" rows="5" required></textarea>
             </div>
+            <div x-show="replacing" class="mb-1" style="border: 1px solid var(--error); border-radius: 6px; padding: 0.6rem">
+              <strong>This replaces the key of an existing organization.</strong>
+              <p class="text-small" style="margin: 0.3rem 0">
+                Use it when the current installation is lost or compromised. Every device the old key authorized is revoked in the
+                same step, so the old installation can no longer sign anything. Approve only a request you made yourself on a clean
+                installation.
+              </p>
+              <div class="form-group" style="margin-bottom: 0">
+                <label>What the old devices signed is untrusted since (leave empty: nothing they ever signed counts)</label>
+                <input type="datetime-local" x-model="org.since">
+                <div class="text-small text-muted">
+                  Attestations they made before this time keep counting. The time comes from the signer, so it is your judgment, not proof.
+                </div>
+              </div>
+            </div>
             <div class="form-group" x-show="$store.protection.needsPassword">
               <label>Active identity's password (signs as owner)</label>
               <input type="password" x-model="org.password" autocomplete="current-password">
@@ -1122,13 +1137,17 @@
             <p class="text-small text-muted mb-1" x-show="!$store.protection.needsPassword" x-text="$store.protection.passwordHint"></p>
             <button type="submit" class="btn" :disabled="$store.app.loading">Approve</button>
           </form>
-          <template x-if="org.result && org.result.complete">
+          <template x-if="org.result && org.result.complete && org.result.kind === 'replace'">
+            <p class="text-small mt-1">Done: <strong x-text="org.result.name"></strong> now has the new key. The new installation finishes the handover by itself.</p>
+          </template>
+          <template x-if="org.result && org.result.complete && org.result.kind !== 'replace'">
             <p class="text-small mt-1">Organization hash (for the verifier's ISSUER_ORG):<br>
               <code x-text="org.result.orgHash" style="word-break: break-all"></code></p>
           </template>
           <template x-if="org.result && !org.result.complete">
-            <div class="text-small mt-1">Other owners still have to approve. Give them this:
-              <textarea readonly rows="4" onclick="this.select()" x-text="JSON.stringify({ genesis: org.result.genesis })"></textarea></div>
+            <div class="text-small mt-1">Other owners still have to approve<span x-show="org.result.kind === 'replace'" x-text="' (' + org.result.approved + ' of ' + org.result.total + ' so far; more than half decides)'"></span>. Give them this:
+              <textarea readonly rows="4" onclick="this.select()"
+                        x-text="JSON.stringify(org.result.kind === 'replace' ? { proposal: org.result.proposal } : { genesis: org.result.genesis })"></textarea></div>
           </template>
           <hr style="margin: 1rem 0; border: 0; border-top: 1px solid var(--border, #ccc)">
           <p class="text-small text-muted mb-1">

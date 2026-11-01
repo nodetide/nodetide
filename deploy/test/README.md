@@ -219,6 +219,21 @@ trustees) is the organization's recovery. Setting it up, once:
    issuing (a self-run organization authorizes its own signing key; for a managed one authorize the key with the second form).
    The node reads the verifier's published issuer from the shared file whenever it changes, so it needs no restart either.
 
+### If the verifier installation is lost or compromised
+
+The owners replace the organization's key; nothing the old installation says is used, and the old one is cut off.
+
+1. Set up a **clean** installation (a new host or a new data volume) with `ISSUER_OWNED=1`, `ISSUER_ORG=<the organization's hash>` and
+   `ISSUER_REPLACE=<the same hash>`. It makes new keys and publishes a *replacement request* (the new public key only) at
+   `/api/issuer/request`. Never reuse anything from the compromised installation.
+2. In the web client, **My Identity**, **Organizations you own**: the card fetches the request and says "This replaces the key of an existing
+   organization". Choose the time from which what the old devices signed is untrusted (empty: nothing they ever signed counts; a time keeps
+   the attestations made before it) and approve. With several owners each approves in turn; more than half of the weight decides.
+3. The approval is one `rotate_master` event that also revokes every device the old key authorized, so there is no window. The new installation sees
+   it, has the new key authorize its own signing device and starts issuing. The old installation finds it is no longer the key and stops issuing.
+
+The time is the owners' judgment: attestations carry the signer's own date, which an attacker can forge, so nothing can prove when a compromise began.
+
 ## SMS codes (phone claims)
 
 The verification service also verifies **phone** claims: it queues an SMS and a gateway script with a USB modem

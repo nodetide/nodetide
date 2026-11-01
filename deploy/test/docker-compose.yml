@@ -77,6 +77,8 @@ services:
       # self (default): the organization's own key handles devices, owners are not involved in its activity.
       # managed: the owners also approve every device change.
       NODETIDE_ISSUER_GOVERNANCE: ${ISSUER_GOVERNANCE:-}
+      # Set (to the organization's hash) ONLY on a fresh installation that takes over from a lost or compromised one
+      NODETIDE_ISSUER_REPLACE: ${ISSUER_REPLACE:-}
       NODETIDE_ISSUER_ORG: ${ISSUER_ORG:-}
       NODETIDE_ISSUER_NODE: ${NODE_URL}
       # mail goes to the catch-all mailbox below unless SMTP_HOST is set in .env (then to the real recipient)

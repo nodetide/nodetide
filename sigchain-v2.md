@@ -68,3 +68,9 @@ says so and looks elsewhere.
 
 Freshness (proving there is nothing newer than the head a node shows) is not solved here; neither is hiding the commitment of
 a content event (the Merkle root is public, the events are fetched on demand and may be kept private by a node).
+
+## Replacing a compromised key
+
+A `rotate_master` approved by the owners of an organization may carry `revoke_devices` (`"all"` or a list of device keys) and `untrusted_since`; a `revoke_device` may
+carry `untrusted_since`. A revoked device's attestations stop counting, except those issued before `untrusted_since`. The time is chosen by whoever revokes: an
+attestation's date is the signer's own claim, so it is a judgment about when a compromise began and not a proof.

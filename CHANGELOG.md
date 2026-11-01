@@ -3,6 +3,18 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (key replacement) - owners replace a compromised verifier's key from outside
+
+- **Chain** (`core/identity.py`): `rotate_master` may carry `revoke_devices` (`"all"` or a list) and `untrusted_since`; `revoke_device` may carry `untrusted_since`. A rotation
+  by the owners can therefore revoke every device the old key authorized in the same step (no window for the compromised signing device). A device revoked with a time T still
+  counts for attestations issued before T; without T nothing it ever signed counts (`issuer_key_check(..., issued_at)`, `Sigchain.device_status`). T is the owners' judgment: a
+  signer's own dates can be forged.
+- **Verifier**: a fresh installation with `ISSUER_REPLACE=<org hash>` makes new keys and publishes a *replacement request* (public key only). It notices when the organization's
+  current key is its own, authorizes its signing device and starts issuing. The old installation, finding its key replaced, stops (it no longer restarts into a loop trying to re-adopt).
+  The compromised installation never takes part in its own replacement.
+- **Web client**: "Organizations you own" recognizes a replacement request, warns what it does, takes the untrusted-since time and collects approvals from several owners.
+- Tests: `test_key_replacement.py`, and the browser test approves a replacement through the card.
+
 ## 2026-11-01 (leftovers) - claims the chain does not have are flagged
 
 - On unlock the browser wallet asks the node which claims the identity's chain actually has. A local claim it does not have (typically a restored backup of an
