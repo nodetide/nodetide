@@ -396,3 +396,54 @@ async def test_passkey_unlocks_the_wallet():
             except subprocess.TimeoutExpired:
                 chrome.kill()
         await node.close()
+
+
+async def test_explorer_accepts_the_start_of_a_hash():
+    from nodetide.core.identity import Identity
+
+    node = TestServer(create_app(storage=Storage.memory(), web_root=str(WEB)))
+    await node.start_server()
+    base = f"http://127.0.0.1:{node.port}"
+    chrome = None
+    try:
+        async with aiohttp.ClientSession() as http:
+            person = Identity.create(name="Prefix Person")
+            async with http.post(f"{base}/api/identities", json={"event": person.sigchain.to_list()[0]}) as r:
+                assert r.status == 201
+            full = person.identity_hash
+            chrome = subprocess.Popen(
+                [CHROME, "--headless=new", f"--remote-debugging-port={CDP_PORT}", f"--user-data-dir={tempfile.mkdtemp()}",
+                 "--no-first-run", "--disable-gpu", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            tabs = None
+            for _ in range(50):
+                try:
+                    async with http.get(f"http://127.0.0.1:{CDP_PORT}/json") as r:
+                        tabs = await r.json()
+                        break
+                except aiohttp.ClientError:
+                    await asyncio.sleep(0.2)
+            tab = next(t for t in tabs if t["type"] == "page")
+            async with http.ws_connect(tab["webSocketDebuggerUrl"]) as ws:
+                page = Page(ws)
+                await page.call("Runtime.enable")
+                await page.call("Page.enable")
+
+                async def open_hash(fragment):
+                    await page.call("Page.navigate", url=f"{base}/explorer/{fragment}")
+                    await asyncio.sleep(2)
+                    return await page.js("location.hash"), await page.js("document.body.innerText")
+
+                where, text = await open_hash(f"#/identity/{full[:8]}")
+                assert where == f"#/identity/{full}" and "Prefix Person" in text      # the short form finds the full page
+                where, text = await open_hash(f"#/identity/{full}")
+                assert "Prefix Person" in text and "Page not found" not in text
+                where, text = await open_hash("#/identity/" + ("0" if not full.startswith("0") else "f") * 8)
+                assert "No identity starts with" in text and "Page not found" not in text
+    finally:
+        if chrome:
+            chrome.terminate()
+            try:
+                chrome.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                chrome.kill()
+        await node.close()

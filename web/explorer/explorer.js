@@ -608,6 +608,26 @@
     });
   }
 
+  // An address with only the start of a hash (a copied short form, "42031f7e"): find the one identity or event it
+  // names and go there; if several match, list them; if none, say so.
+  function prefixPage(kind) {
+    return function (m) {
+      var prefix = m[1];
+      return api('/search', { q: prefix }).then(function (data) {
+        var found = data.results.filter(function (r) { return r.kind === kind; });
+        if (found.length === 1) {
+          location.replace('#/' + kind + '/' + found[0].id);
+          return h('p', { class: 'muted' }, 'Opening ' + shortHash(found[0].id) + '…');
+        }
+        return h('div', null,
+          h('h1', null, found.length ? 'Several ' + kind + 's start with ' + prefix : 'No ' + kind + ' starts with ' + prefix),
+          found.length ? table(['Match', 'Detail'], found.map(function (r) {
+            return [h('a', { href: '#/' + kind + '/' + r.id, class: 'hash', title: r.id }, shortHash(r.id)), r.label || ''];
+          }), '') : h('p', null, h('a', { href: '#/' }, 'Back to the overview')));
+      });
+    };
+  }
+
   function notFound() {
     return h('div', null, h('h1', null, 'Page not found'), h('p', null, h('a', { href: '#/' }, 'Back to the overview')));
   }
@@ -618,8 +638,10 @@
     [/^\/?$/, home, ''],
     [/^\/identities$/, identities, 'identities'],
     [/^\/identity\/([0-9a-f]{64})$/, identityPage, 'identities'],
+    [/^\/identity\/([0-9a-f]{4,63})$/, prefixPage('identity'), 'identities'],
     [/^\/events$/, events, 'events'],
     [/^\/event\/([0-9a-f]{64})$/, eventPage, 'events'],
+    [/^\/event\/([0-9a-f]{4,63})$/, prefixPage('event'), 'events'],
     [/^\/messages$/, messages, 'messages'],
     [/^\/message\/([0-9a-f]{64})$/, messagePage, 'messages'],
     [/^\/attestations$/, attestationsPage, 'attestations'],

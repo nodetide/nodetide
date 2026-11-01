@@ -58,6 +58,8 @@ still open, so a new session can pick up without re-deriving context.
   browser wallet can now **Publish attestation** for a verified claim (POST /api/attestations; public, shows that the claim is attested and by whom, never the
   value) and the claim's timeline records it.
 
+- Explorer: `#/identity/<start of hash>` and `#/event/<start of hash>` resolve to the one match (or list several / say none) instead of "Page not found".
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.
