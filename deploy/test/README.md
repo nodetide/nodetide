@@ -247,6 +247,7 @@ Profile `mail` runs a one-mailbox mail server ([docker-mailserver](https://githu
   from the state), DMARC `p=quarantine`, and the reverse DNS (PTR) of both addresses to `nt-mail.<domain>`.
 - **Settings:** `./init.sh --upgrade` adds `MAIL_DOMAIN`, `MAIL_HOST`, `MAIL_ADDRESS`, `MAIL_PASSWORD`, `MAIL_RESPONDER=1` and the `mail` profile to an existing `.env` (public domains only).
 
+Only senders whose domain publishes a DMARC policy can be answered (OpenDMARC's verdict is the one the node believes; Gmail and most large providers qualify, a domain without a `_dmarc` record does not).
 Try it from your own mailbox: send a message to `chains@<domain>` with `GET info` as the body (your provider must sign with DKIM or have SPF/DMARC set up, which Gmail, Fastmail and the like do).
 
 ## SMS codes (phone claims)

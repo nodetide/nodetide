@@ -52,6 +52,7 @@ class Stats:
 
     def drop(self, why: str) -> None:
         self.dropped[why] = self.dropped.get(why, 0) + 1
+        logger.info("mail responder: a message was not answered (%s)", why)   # the reason only, never the address
 
 
 class Responder:
@@ -112,6 +113,7 @@ class Responder:
             await self.sender.send_message(reply)
             sent += 1
         self.stats.answered += bool(sent)
+        logger.info("mail responder: answered %d request(s) with %d message(s)", len(commands) or 1, sent)
         return sent
 
     # --- answering ------------------------------------------------------------------------------------------------
