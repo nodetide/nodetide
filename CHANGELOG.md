@@ -6,7 +6,7 @@ still open, so a new session can pick up without re-deriving context.
 ## 2026-11-02 (My Identity in sub-tabs)
 
 - **My Identity is split into six sub-tabs**: Overview (info, share QR), Claims, Devices & recovery, Publish (distribution points, DNS state record), Organizations (with a dot when a verification service waits for approval),
-  History (the sigchain). One **wallet bar** above them unlocks the keys once for every tab; the chosen tab is remembered.
+  History (the sigchain). Unlocking from the Overview opens Claims (what unlocking used to reveal), and the Overview has an "At a glance" card (claims, devices, recovery, distribution points, events, each a link to its tab). One **wallet bar** above them unlocks the keys once for every tab; the chosen tab is remembered.
 - **Fixed: "Edit" on Distribution Points did nothing.** It needed the other unlock (Identities tab) and only showed a toast that is easy to miss, and when it did get as far as saving it was broken twice over: the event followed
   the wrong event (the last of *all* events, hashed with a non-canonical hash) and did not commit to the claims, so a node refuses it once the identity has claims. It now signs through the wallet, follows the last control event,
   commits to the content, checks each point (mailto: one plain address, dns: a public domain, https URLs, other schemes by shape) before signing, and says in the dialog what is wrong. A browser test covers the real clicks.

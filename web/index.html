@@ -141,6 +141,8 @@
       background: var(--warning, #e0a000);
     }
 
+    .glance > div { padding: 0.35rem 0; display: flex; gap: 0.6rem; align-items: baseline; }
+    .glance .link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 1rem; min-width: 9rem; text-align: left; }
     .wallet-bar { padding: 0.6rem 1rem; }
     .wallet-bar-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
     .wallet-bar-row input { max-width: 16rem; margin: 0; }
@@ -979,11 +981,11 @@
           <!-- One wallet bar for every tab: the keys are unlocked here, once -->
           <div class="card wallet-bar" x-show="$store.identity.activeHash">
             <template x-if="!unlocked">
-              <form @submit.prevent="unlock" class="wallet-bar-row">
+              <form @submit.prevent="unlock().then(() => { if (unlocked && tab === 'overview') setTab('claims') })" class="wallet-bar-row">
                 <strong>Wallet locked</strong>
                 <input type="password" x-model="password" placeholder="Identity password" autocomplete="current-password" required>
                 <button type="submit" class="btn btn-small" :disabled="$store.app.loading">Unlock</button>
-                <button type="button" class="btn btn-small btn-secondary" x-show="hasPasskey && canPasskey" @click="unlockWithPasskey()"
+                <button type="button" class="btn btn-small btn-secondary" x-show="hasPasskey && canPasskey" @click="unlockWithPasskey().then(() => { if (unlocked && tab === 'overview') setTab('claims') })"
                         :disabled="$store.app.loading" data-testid="unlock-passkey">Unlock with passkey</button>
                 <details class="text-small text-muted" style="flex-basis: 100%">
                   <summary>What does unlocking do?</summary>
@@ -1060,6 +1062,22 @@
               <div x-ref="scanContainer" x-show="scanning" class="mt-1 text-center"></div>
             </div>
           </div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">At a glance</span></div>
+              <div class="glance">
+                <div><button type="button" class="link" @click="setTab('claims')">Claims</button>
+                  <span x-show="unlocked"><span x-text="claims.length"></span> (<span x-text="claims.filter(c => c.verified).length"></span> verified)</span>
+                  <span x-show="!unlocked" class="text-muted">unlock the wallet to see them</span></div>
+                <div><button type="button" class="link" @click="setTab('devices')">Devices</button>
+                  <span x-text="activeDevices.length"></span> active</div>
+                <div><button type="button" class="link" @click="setTab('devices')">Recovery</button>
+                  <span x-text="recovery ? 'configured' : 'not set up'"></span></div>
+                <div><button type="button" class="link" @click="setTab('publish')">Distribution points</button>
+                  <span x-text="distributionPoints.length"></span></div>
+                <div><button type="button" class="link" @click="setTab('history')">History</button>
+                  <span x-text="sigchain.length"></span> events</div>
+              </div>
+            </div>
           </div>
 
           <div x-show="tab === 'claims'" role="tabpanel" x-cloak>

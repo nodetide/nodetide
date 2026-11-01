@@ -82,8 +82,8 @@ async def test_sub_tabs_and_editing_distribution_points():
                     assert await visible_panels() == [t], t
                 # the overview holds the identity's facts and QR, not the whole page
                 await page.js(f"{detail}.setTab('overview')")
-                text = await page.js("[...document.querySelectorAll('[role=tabpanel]')].find(p=>p.offsetParent!==null).innerText")
-                assert "Identity Info" in text and "Share Identity" in text and "Distribution Points" not in text and "Claims" not in text
+                titles = await page.js("[...[...document.querySelectorAll('[role=tabpanel]')].find(p=>p.offsetParent!==null).querySelectorAll('.card-title')].map(c=>c.textContent.trim())")
+                assert titles == ["Identity Info", "Share Identity", "At a glance"]
                 # an unknown tab is ignored; the chosen tab survives a reload
                 await page.js(f"{detail}.setTab('nonsense')")
                 assert await page.js(f"{detail}.tab") == "overview"
@@ -92,6 +92,13 @@ async def test_sub_tabs_and_editing_distribution_points():
                 await page.js("Alpine.store('app').setView('identity')")
                 await asyncio.sleep(0.8)
                 assert await visible_panels() == ["publish"]
+
+                # unlocking from the overview takes you to the claims (that is what unlocking used to reveal); the overview has a summary
+                await page.js(f"{detail}.setTab('overview')")
+                await asyncio.sleep(0.3)
+                summary = await page.js("[...document.querySelectorAll('.glance')][0].innerText")
+                assert "unlock the wallet to see them" in summary and "events" in summary and "not set up" in summary
+                await page.js(f"{detail}.setTab('publish')")
 
                 # Edit with the wallet locked says what to do instead of nothing
                 await page.js("Alpine.store('app').error=null; [...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Edit').click()")
@@ -109,6 +116,19 @@ async def test_sub_tabs_and_editing_distribution_points():
                     await asyncio.sleep(0.2)
                 assert await page.js("Alpine.store('wallet').unlocked") is True
                 assert "Wallet unlocked" in await page.js("document.querySelector('.wallet-bar').innerText")
+                assert await page.js(f"{detail}.tab") == "publish"                       # unlocking elsewhere keeps you where you are
+                await page.js("[...document.querySelectorAll('.wallet-bar button')].find(b=>b.textContent.trim()==='Lock').click()")
+                await asyncio.sleep(0.3)
+                await page.js(f"{detail}.setTab('overview')")
+                await asyncio.sleep(0.3)
+                await page.js("""(()=>{const i=document.querySelector('.wallet-bar input[type=password]'); i.value='tabs-pass-12';
+                    i.dispatchEvent(new Event('input')); [...document.querySelectorAll('.wallet-bar button')].find(b=>b.textContent.trim()==='Unlock').click()})()""")
+                for _ in range(30):
+                    if await page.js(f"{detail}.tab") == "claims":
+                        break
+                    await asyncio.sleep(0.2)
+                assert await page.js(f"{detail}.tab") == "claims" and await visible_panels() == ["claims"]
+                await page.js(f"{detail}.setTab('publish')")
                 # a claim first, so the chain has content the new control event must commit to
                 wallet = comp("[x-data=walletUI]")
                 assert await attempt(f"const c={wallet}; c.email='tabs@example.com'; await c.addEmail();") is None
