@@ -295,4 +295,8 @@ async def test_banner_backup_recovery_and_restore():
     finally:
         if chrome:
             chrome.terminate()
+            try:
+                chrome.wait(timeout=15)  # the next test reuses the debugging port
+            except subprocess.TimeoutExpired:
+                chrome.kill()
         await server.close()

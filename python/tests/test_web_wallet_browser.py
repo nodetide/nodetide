@@ -111,10 +111,41 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                 claims = await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))")
                 assert len(claims) == 1 and claims[0]["value"] == "Alice@example.com" and claims[0]["verified"] is False
                 claim_id = claims[0]["id"]
+                # the same address again (any case, spaces) is refused; the wallet holds one claim per value
+                assert "already in your wallet" in await attempt(f"const c={wallet}; c.email=' ALICE@example.com'; await c.addEmail();")
+                assert len(await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))")) == 1
                 async with http.get(f"{base}/api/identities/{identity}/sigchain") as r:
                     chain = await r.json()
                 added = [e for e in chain["events"] if e["type"] == "add_claim"]
                 assert len(added) == 1 and added[0]["claim_id"] == claim_id and "alice" not in json.dumps(added[0]).lower()
+
+                # renouncing gives a claim up on the chain but keeps it (hidden) with its history
+                assert await attempt(f"const c={wallet}; c.phone='+359 88 123 4567'; await c.addPhone();") is None
+                phone = [c for c in await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))") if c["type"] == "phone"][0]
+                await page.js("window.confirm = () => true")
+                assert await attempt(f"await {wallet}.renounce({json.dumps(phone['id'])});") is None
+                visible = await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))")
+                assert [c["type"] for c in visible] == ["email"]                       # hidden by default
+                assert await page.js(f"{wallet}.renouncedCount") == 1
+                await page.js(f"{wallet}.showRenounced = true; {wallet}.refresh()")
+                shown = await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))")
+                assert [c["type"] for c in shown] == ["email", "phone"] and shown[1]["renounced"] is True and shown[1]["codeable"] is False
+                await page.js(f"{wallet}.showRenounced = false; {wallet}.refresh()")
+                async with http.get(f"{base}/api/identities/{identity}/sigchain") as r:
+                    revoked = [e for e in (await r.json())["events"] if e["type"] == "revoke_claim"]
+                assert len(revoked) == 1 and revoked[0]["claim_id"] == phone["id"]
+                async with http.get(f"{base}/api/identities/{identity}") as r:
+                    assert (await r.json())["verified"] is True
+                # its timeline is still readable: claimed, then renounced, both on the chain
+                await page.js(f"{wallet}.toggle({json.dumps(phone['id'])})")
+                await asyncio.sleep(0.5)
+                tl = await page.js(f"JSON.parse(JSON.stringify({wallet}.details[{json.dumps(phone['id'])}]))")
+                assert [e["label"].split(" ")[0] for e in tl["entries"] if e["source"] == "chain"] == ["Claimed", "Renounced"]
+                # the value can be claimed again, and a renounced one is never offered or verified
+                assert await attempt(f"const c={wallet}; c.phone='+359881234567'; await c.addPhone();") is None
+                again = [c for c in await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))") if c["type"] == "phone"][0]
+                assert again["id"] != phone["id"]
+                assert await attempt(f"await {wallet}.renounce({json.dumps(again['id'])});") is None
 
                 # verification: the verifier (another origin) recomputes the commitment and mails a code
                 assert await attempt(f"await {wallet}.verify({json.dumps(claim_id)});") is None
@@ -124,6 +155,32 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                 assert await attempt(f"const c={wallet}; c.codes[{json.dumps(claim_id)}]={json.dumps(code)}; await c.confirm({json.dumps(claim_id)});") is None
                 claims = await page.js(f"JSON.parse(JSON.stringify({wallet}.claims))")
                 assert claims[0]["verified"] is True and claims[0]["method"] == "email_code" and claims[0]["issuer"] == "Browser Test Verifier"
+
+                # the timeline of a verified claim: chain event, code request, attestation; raw events; explorer link
+                await page.js(f"{wallet}.toggle({json.dumps(claim_id)})")
+                await asyncio.sleep(0.5)
+                tl = await page.js(f"JSON.parse(JSON.stringify({wallet}.details[{json.dumps(claim_id)}]))")
+                labels = [e["label"] for e in tl["entries"]]
+                assert labels[0].startswith("Added to this wallet") or labels[0].startswith("Claimed")
+                assert any(l.startswith("Claimed on your identity chain") for l in labels)
+                assert any("code was requested" in l for l in labels) and any(l.startswith("Verified by Browser Test Verifier") for l in labels)
+                assert any(l == "Attestation expires" for l in labels)
+                times = [e["t"] for e in tl["entries"]]
+                assert times == sorted(times)
+                titles = [r["title"] for r in tl["raw"]]
+                assert any(t.startswith("add_claim event") for t in titles) and any(t.startswith("attestation") for t in titles)
+                raw_event = next(r for r in tl["raw"] if r["title"].startswith("add_claim"))
+                from nodetide.core.identity import SigchainEvent
+                assert raw_event["json"]["claim_id"] == claim_id
+                # the hash shown and linked is the one Python computes for that very event
+                assert raw_event["hash"] == SigchainEvent.from_dict(raw_event["json"]).event_hash()
+                assert tl["explorer"]["event"] == f"{base}/explorer/#/event/{raw_event['hash']}"
+                assert tl["explorer"]["identity"] == f"{base}/explorer/#/identity/{identity}"
+                attestation_raw = next(r for r in tl["raw"] if r["title"].startswith("attestation"))
+                assert "alice" not in json.dumps(attestation_raw["json"]).lower()  # the attestation does not carry the value
+                async with http.get(f"{base}/api/explorer/events/{raw_event['hash']}") as r:
+                    assert r.status == 200  # the explorer really knows the event the link points to
+                    assert (await r.json())["event_type"] == "add_claim" if "event_type" in (await r.json()) else True
 
                 # the web client's device now carries real capabilities
                 async with http.get(f"{base}/api/identities/{identity}") as r:
@@ -209,6 +266,10 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
     finally:
         if chrome:
             chrome.terminate()
+            try:
+                chrome.wait(timeout=15)  # the next test reuses the debugging port
+            except subprocess.TimeoutExpired:
+                chrome.kill()
         await node.close()
         await verifier_server.close()
 
@@ -313,4 +374,8 @@ async def test_passkey_unlocks_the_wallet():
     finally:
         if chrome:
             chrome.terminate()
+            try:
+                chrome.wait(timeout=15)  # the next test reuses the debugging port
+            except subprocess.TimeoutExpired:
+                chrome.kill()
         await node.close()

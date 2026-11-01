@@ -998,7 +998,7 @@
 
   const Wallet = {
     storageKey(hash) { return `nodetide_wallet_${hash}`; },
-    emptyData() { return { claims: {}, attestations: [], issuer_chains: {}, verifications: {} }; },
+    emptyData() { return { claims: {}, attestations: [], issuer_chains: {}, verifications: {}, history: {} }; },
 
     async unlock(hash, password) {
       const identity = KeyStore.getIdentity(hash);
@@ -1100,6 +1100,11 @@
     async addClaim(hash, type, value) {
       const s = this.session(hash);
       const normalized = this.normalizeValue(type, value);
+      // The chain only holds salted commitments, so only the holder can notice that a value is already claimed.
+      // (Email local parts are case-sensitive in theory and never in practice, so Alice@ and alice@ count as one.)
+      const key = v => (type === 'email' ? String(v).toLowerCase() : canonicalize(v));
+      const same = Object.values(s.data.claims).find(d => !d.renounced_at && d.claim_type === type && key(d.value) === key(normalized));
+      if (same) throw new Error(`This ${type === 'legal_name' ? 'name' : type} is already in your wallet; remove that claim first if you want to start again`);
       const claimId = this.newClaimId();
       const salt = encodeHex(crypto.getRandomValues(new Uint8Array(16)));
       const commitment = await this.commitment(claimId, type, salt, normalized);
@@ -1111,15 +1116,85 @@
       event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
       // keep the value before the chain commits to it: a commitment without its value could never be shown again
       s.data.claims[claimId] = { identity: hash, claim_id: claimId, claim_type: type, value: normalized, salt };
+      this.note(s, claimId, 'created', 'Added to this wallet');
       await this.save(hash);
       try {
         await api.submitEvent(hash, event);
       } catch (e) {
         delete s.data.claims[claimId];
+        delete s.data.history[claimId];
         await this.save(hash);
         throw e;
       }
       return s.data.claims[claimId];
+    },
+
+    note(s, claimId, kind, detail) {
+      /** A line in this claim's local history (what only this browser knows: codes requested, renounced). */
+      (s.data.history[claimId] = s.data.history[claimId] || []).push({ t: Math.floor(Date.now() / 1000), kind, detail });
+    },
+
+    async renounceClaim(hash, claimId) {
+      /**
+       * Give a claim up, verified or not: a revoke_claim event on the chain. The value, its attestations and its history
+       * stay here (hidden by default) so its timeline can still be read; it no longer counts, is never offered for a
+       * sign-in, and the same value can be claimed again.
+       */
+      const s = this.session(hash);
+      const doc = s.data.claims[claimId];
+      if (!doc || doc.renounced_at) throw new Error('Unknown or already renounced claim');
+      const { head } = await this.chain(hash);
+      const event = {
+        version: 1, type: 'revoke_claim', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: head, signed_by: s.master.signing.publicKey, claim_id: claimId, reason: 'renounced by the holder',
+      };
+      event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
+      await api.submitEvent(hash, event);
+      doc.renounced_at = event.timestamp;
+      doc.renounced_event = await sha256(canonicalize(event));
+      delete s.data.verifications[claimId];
+      this.note(s, claimId, 'renounced', 'You renounced this claim');
+      await this.save(hash);
+    },
+
+    async timeline(hash, claimId) {
+      /** Everything known about one claim, oldest first, and the raw material behind it. */
+      const s = this.session(hash);
+      const doc = s.data.claims[claimId];
+      if (!doc) throw new Error('Unknown claim');
+      const { events } = await this.chain(hash);
+      const entries = [];
+      const raw = [];
+      let addedHash = null;
+      for (const e of events) {
+        if (e.claim_id !== claimId) continue;
+        const eventHash = await sha256(canonicalize(e));
+        if (e.type === 'add_claim') {
+          addedHash = eventHash;
+          entries.push({ t: e.timestamp, source: 'chain', label: `Claimed on your identity chain (${e.claim_type})`, hash: eventHash });
+          raw.push({ title: 'add_claim event (signed by your key, on the chain)', hash: eventHash, json: e });
+        } else if (e.type === 'revoke_claim') {
+          entries.push({ t: e.timestamp, source: 'chain', label: 'Renounced on your identity chain', hash: eventHash });
+          raw.push({ title: 'revoke_claim event (on the chain)', hash: eventHash, json: e });
+        }
+      }
+      for (const h of s.data.history[claimId] || []) {
+        if (h.kind === 'renounced') continue; // the chain event above says it
+        entries.push({ t: h.t, source: 'this browser', label: h.detail });
+      }
+      for (const a of s.data.attestations.filter(x => x.claim_id === claimId)) {
+        const issuer = s.data.issuer_chains[a.issuer];
+        const who = (issuer && issuer.name) || a.issuer.slice(0, 12);
+        entries.push({ t: a.issued_at, source: 'issuer', label: `Verified by ${who} (${a.method}, ${a.assurance} assurance)` });
+        entries.push({ t: a.expires_at, source: 'issuer', label: 'Attestation expires', future: a.expires_at > Math.floor(Date.now() / 1000) });
+        raw.push({ title: `attestation (signed by ${who}; the value is not in it)`, json: a });
+      }
+      entries.sort((x, y) => x.t - y.t);
+      const base = window.location.origin + '/explorer/#';
+      return {
+        entries, raw,
+        explorer: { event: addedHash ? `${base}/event/${addedHash}` : null, identity: `${base}/identity/${hash}` },
+      };
     },
 
     // ---- verification service ----
@@ -1175,7 +1250,7 @@
     async startVerification(hash, claimId) {
       const s = this.session(hash);
       const doc = s.data.claims[claimId];
-      if (!doc) throw new Error('Unknown claim');
+      if (!doc || doc.renounced_at) throw new Error('Unknown or renounced claim');
       if (!['email', 'phone'].includes(doc.claim_type)) throw new Error('Only email and phone claims are verified with a code');
       await this.ensureDeviceMayAuthenticate(hash);
       const challenge = await this.verifier('POST', '/api/auth/challenge', {});
@@ -1186,6 +1261,7 @@
       const started = await this.verifier('POST', `/api/verify/${doc.claim_type}/start`, { document: doc, assertion, sigchain: events });
       if (started.status !== 202) throw new Error(started.json.message || `Verification not started (${started.status})`);
       s.data.verifications[claimId] = { verification_id: started.json.verification_id, expires_at: started.json.expires_at, kind: doc.claim_type };
+      this.note(s, claimId, 'code', `A code was requested from the verification service (valid until ${new Date(started.json.expires_at * 1000).toLocaleTimeString()})`);
       await this.save(hash);
       return { expiresAt: started.json.expires_at, message: started.json.message || '' };
     },
@@ -1235,7 +1311,7 @@
         const rows = [];
         for (const att of s.data.attestations) {
           const doc = s.data.claims[att.claim_id];
-          if (!doc || doc.claim_type !== type || att.expires_at <= now) continue;
+          if (!doc || doc.renounced_at || doc.claim_type !== type || att.expires_at <= now) continue;
           rows.push({ att, doc });
         }
         // best assurance, then latest expiry; the first of a type is the default
@@ -1669,6 +1745,10 @@
       claims: [],
       busyId: null,
       note: '',
+      showRenounced: false,
+      renouncedCount: 0,
+      open: {},
+      details: {},
 
       get hash() { return Alpine.store('identity').activeHash; },
       get unlocked() { return Alpine.store('wallet').unlocked; },
@@ -1703,15 +1783,17 @@
 
       refresh() {
         const s = this.hash && WalletSession.get(this.hash);
-        this.claims = !s ? [] : Object.values(s.data.claims).map(doc => {
+        const all = !s ? [] : Object.values(s.data.claims);
+        this.renouncedCount = all.filter(d => d.renounced_at).length;
+        this.claims = all.filter(d => this.showRenounced || !d.renounced_at).sort((a, b) => !!a.renounced_at - !!b.renounced_at).map(doc => {
           const att = s.data.attestations.find(a => a.claim_id === doc.claim_id);
           const pending = s.data.verifications[doc.claim_id];
           return {
-            id: doc.claim_id, type: doc.claim_type,
+            id: doc.claim_id, type: doc.claim_type, renounced: !!doc.renounced_at, renouncedAt: doc.renounced_at || null,
             value: typeof doc.value === 'string' ? doc.value : Object.values(doc.value).join(' '),
             verified: !!att, method: att ? att.method : null, assurance: att ? att.assurance : null,
             issuer: att ? (s.data.issuer_chains[att.issuer] && s.data.issuer_chains[att.issuer].name) || att.issuer.slice(0, 12) : null,
-            pending: !!pending, codeable: ['email', 'phone'].includes(doc.claim_type),
+            pending: !!pending, codeable: ['email', 'phone'].includes(doc.claim_type) && !doc.renounced_at,
           };
         });
       },
@@ -1756,6 +1838,27 @@
         const value = this.phone;
         await this.run('add', async () => { await Wallet.addClaim(this.hash, 'phone', value); this.phone = ''; }, 'Phone claim added. Verify it below.');
       },
+      async renounce(id) {
+        const claim = this.claims.find(c => c.id === id);
+        if (!window.confirm(`Renounce the ${claim.type} ${claim.value}? ${claim.verified ? 'Its verification stops counting. ' : ''}This is recorded on your identity's chain. The claim is hidden, not forgotten: you can still read its timeline.`)) return;
+        await this.run(id, () => Wallet.renounceClaim(this.hash, id), 'Claim renounced.');
+      },
+
+      async toggle(id) {
+        this.open = { ...this.open, [id]: !this.open[id] };
+        if (this.open[id]) await this.loadDetails(id);
+      },
+
+      async loadDetails(id) {
+        try {
+          this.details = { ...this.details, [id]: await Wallet.timeline(this.hash, id) };
+        } catch (e) {
+          Alpine.store('app').showError('Could not read the timeline: ' + e.message);
+        }
+      },
+
+      when(t) { return new Date(t * 1000).toLocaleString(); },
+      pretty(json) { return JSON.stringify(json, null, 2); },
       async verify(id) {
         await this.run(id, () => Wallet.startVerification(this.hash, id), r => r.message || 'A code was sent. Type it below.');
       },

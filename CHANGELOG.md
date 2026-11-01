@@ -47,6 +47,12 @@ still open, so a new session can pick up without re-deriving context.
 - "Organizations you own" (Wallet tab) lists the organizations whose current owners include the active identity: name, kind, hash, owners with their share,
   devices.
 
+- **Claims in the browser wallet**: one claim per value (the same address in any case or spacing is refused; the chain holds only salted commitments, so only the
+  wallet can notice). **Renounce** any claim, verified or not: a `revoke_claim` event on the chain; the claim is hidden by default (a "Show renounced claims"
+  switch lists them), is never offered for a sign-in or verified, and its value can be claimed again. Nothing is forgotten locally: every claim has a **Timeline**
+  (claimed on the chain, codes requested here, verified by whom with what assurance, attestation expiry, renounced), the **raw events** behind it (the
+  `add_claim`/`revoke_claim` events and the issuer's attestation) and links to the **explorer** for the event and the identity.
+
 ### Open
 - Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
   browsers; a content security policy for the web client; `navigator.storage.persist()`.

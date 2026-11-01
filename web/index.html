@@ -1223,13 +1223,18 @@
           </div>
           <p class="text-muted text-small" x-show="claims.length === 0">No claims yet. Add an email address or a phone number below.</p>
           <template x-for="c in claims" :key="c.id">
-            <div class="mb-1" style="padding: 0.5rem 0; border-top: 1px solid var(--border, #ddd)">
+            <div class="mb-1" style="padding: 0.5rem 0; border-top: 1px solid var(--border, #ddd)" :style="c.renounced ? 'opacity: 0.6' : ''">
               <div>
                 <strong x-text="c.type"></strong>
-                <span x-text="c.value"></span>
-                <span class="badge" x-show="c.verified" style="color: var(--success)">
+                <span x-text="c.value" :style="c.renounced ? 'text-decoration: line-through' : ''"></span>
+                <span class="badge" x-show="c.verified && !c.renounced" style="color: var(--success)">
                   &#10003; verified by <span x-text="c.issuer"></span> (<span x-text="c.method"></span>, <span x-text="c.assurance"></span>)
                 </span>
+                <span class="badge" x-show="c.renounced" x-text="'renounced ' + when(c.renouncedAt)"></span>
+              </div>
+              <div class="flex gap-1" style="margin-top: 0.3rem; flex-wrap: wrap">
+                <button class="btn btn-small btn-secondary" @click="toggle(c.id)" x-text="open[c.id] ? 'Hide timeline' : 'Timeline'"></button>
+                <button class="btn btn-small btn-secondary" x-show="!c.renounced" @click="renounce(c.id)" :disabled="$store.app.loading">Renounce</button>
               </div>
               <div x-show="!c.verified && c.codeable" class="flex gap-1" style="margin-top: 0.4rem; flex-wrap: wrap">
                 <button class="btn btn-small" @click="verify(c.id)" :disabled="$store.app.loading">
@@ -1242,8 +1247,36 @@
                   </form>
                 </template>
               </div>
+              <div x-show="open[c.id]" class="text-small" style="margin-top: 0.5rem">
+                <template x-if="details[c.id]">
+                  <div>
+                    <ol style="margin: 0 0 0.5rem 1.2rem; padding: 0">
+                      <template x-for="(e, i) in details[c.id].entries" :key="i">
+                        <li :style="e.future ? 'opacity: 0.6' : ''">
+                          <span x-text="when(e.t)"></span> &mdash; <span x-text="e.label"></span>
+                          <span class="text-muted" x-text="'(' + e.source + ')'"></span>
+                        </li>
+                      </template>
+                    </ol>
+                    <div class="flex gap-1" style="flex-wrap: wrap; margin-bottom: 0.4rem">
+                      <a x-show="details[c.id].explorer.event" :href="details[c.id].explorer.event" target="_blank" rel="noopener">Event in the explorer</a>
+                      <a :href="details[c.id].explorer.identity" target="_blank" rel="noopener">Your identity in the explorer</a>
+                    </div>
+                    <template x-for="r in details[c.id].raw" :key="r.title">
+                      <details style="margin-bottom: 0.3rem">
+                        <summary x-text="r.title"></summary>
+                        <div class="text-muted" x-show="r.hash" x-text="'event hash ' + r.hash" style="word-break: break-all"></div>
+                        <pre style="white-space: pre-wrap; word-break: break-all; font-size: 0.75rem" x-text="pretty(r.json)"></pre>
+                      </details>
+                    </template>
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
+          <label class="text-small" x-show="renouncedCount > 0" style="display: block; margin-top: 0.5rem">
+            <input type="checkbox" x-model="showRenounced" @change="refresh()"> Show renounced claims (<span x-text="renouncedCount"></span>)
+          </label>
         </div>
         <div class="card">
           <div class="card-header"><span class="card-title">Add a claim</span></div>
