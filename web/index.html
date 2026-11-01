@@ -1009,12 +1009,18 @@
                   &#10003; verified by <span x-text="c.issuer"></span> (<span x-text="c.method"></span>, <span x-text="c.assurance"></span>)
                 </span>
                 <span class="badge" x-show="c.renounced" x-text="'renounced ' + when(c.renouncedAt)"></span>
+                <span class="badge" x-show="c.orphan" style="color: var(--error)">not on your identity chain</span>
               </div>
               <div class="flex gap-1" style="margin-top: 0.3rem; flex-wrap: wrap">
                 <button class="btn btn-small btn-secondary" @click="toggle(c.id)" x-text="open[c.id] ? 'Hide timeline' : 'Timeline'"></button>
-                <button class="btn btn-small btn-secondary" x-show="c.verified && !c.renounced && !c.published" @click="publish(c.id)" :disabled="$store.app.loading">Publish attestation</button>
-                <button class="btn btn-small btn-secondary" x-show="!c.renounced" @click="renounce(c.id)" :disabled="$store.app.loading">Renounce</button>
+                <button class="btn btn-small btn-secondary" x-show="c.verified && !c.renounced && !c.published && !c.orphan" @click="publish(c.id)" :disabled="$store.app.loading">Publish attestation</button>
+                <button class="btn btn-small btn-secondary" x-show="!c.renounced && !c.orphan" @click="renounce(c.id)" :disabled="$store.app.loading">Renounce</button>
+                <button class="btn btn-small" x-show="c.orphan" @click="forget(c.id)" :disabled="$store.app.loading">Remove from this browser</button>
               </div>
+              <p class="text-small text-muted" x-show="c.orphan" style="margin: 0.3rem 0 0">
+                This came from a backup of an earlier chain. Your identity chain does not have this claim, so it cannot be verified or shown.
+                Remove it and add it again.
+              </p>
               <div x-show="!c.verified && c.codeable" class="flex gap-1" style="margin-top: 0.4rem; flex-wrap: wrap">
                 <button class="btn btn-small" @click="verify(c.id)" :disabled="$store.app.loading">
                   <span x-text="c.pending ? 'Send a new code' : 'Verify'"></span>

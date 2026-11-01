@@ -1045,8 +1045,36 @@
           throw new Error('The stored wallet data could not be decrypted');
         }
       }
-      WalletSession.set(hash, { master, device, password, data, identity });
+      WalletSession.set(hash, { master, device, password, data, identity, onChain: null });
+      await this.reconcile(hash);
       return data;
+    },
+
+    async reconcile(hash) {
+      /** Which local claims does the identity's chain actually have? Leftovers (a restored backup from an earlier chain) are not usable. */
+      const s = WalletSession.get(hash);
+      if (!s) return;
+      try {
+        const chain = await this.chain(hash);
+        s.onChain = new Set(chain.content.filter(e => e.type === 'add_claim').map(e => e.claim_id));
+      } catch {
+        s.onChain = null; // the node cannot be asked right now: do not guess
+      }
+    },
+
+    isOrphan(s, claimId) {
+      return !!s.onChain && !s.onChain.has(claimId) && !(s.data.claims[claimId] || {}).renounced_at;
+    },
+
+    async forgetClaim(hash, claimId) {
+      /** Drop a claim the chain does not have, from this browser only (there is nothing on the chain to renounce). */
+      const s = this.session(hash);
+      if (!this.isOrphan(s, claimId)) throw new Error('That claim is on your identity chain: renounce it instead');
+      delete s.data.claims[claimId];
+      s.data.attestations = s.data.attestations.filter(a => a.claim_id !== claimId);
+      delete s.data.verifications[claimId];
+      delete s.data.history[claimId];
+      await this.save(hash);
     },
 
     async unlockWithPasskey(hash) {
@@ -1195,6 +1223,7 @@
         await this.save(hash);
         throw e;
       }
+      if (s.onChain) s.onChain.add(claimId);
       return s.data.claims[claimId];
     },
 
@@ -1212,6 +1241,7 @@
       const s = this.session(hash);
       const doc = s.data.claims[claimId];
       if (!doc || doc.renounced_at) throw new Error('Unknown or already renounced claim');
+      if (this.isOrphan(s, claimId)) throw new Error('This claim is not on your identity chain: remove it from this browser instead');
       const { head, commitment } = await this.chain(hash);
       const event = {
         version: 1, type: 'revoke_claim', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
@@ -1234,7 +1264,7 @@
        */
       const s = this.session(hash);
       const doc = s.data.claims[claimId];
-      if (!doc || doc.renounced_at) throw new Error('Unknown or renounced claim');
+      if (!doc || doc.renounced_at || this.isOrphan(s, claimId)) throw new Error('Unknown, renounced or not on your identity chain');
       const atts = s.data.attestations.filter(a => a.claim_id === claimId);
       if (!atts.length) throw new Error('This claim has no attestation yet');
       const { all: events } = await this.chain(hash);
@@ -1347,6 +1377,7 @@
       const s = this.session(hash);
       const doc = s.data.claims[claimId];
       if (!doc || doc.renounced_at) throw new Error('Unknown or renounced claim');
+      if (this.isOrphan(s, claimId)) throw new Error('This claim is not on your identity chain (it is left over from an earlier one): remove it and add it again');
       if (!['email', 'phone'].includes(doc.claim_type)) throw new Error('Only email and phone claims are verified with a code');
       await this.ensureDeviceMayAuthenticate(hash);
       await this.ensureCommitted(hash); // the claim is committed before it is attested, so a light verifier can rely on it
@@ -1408,7 +1439,7 @@
         const rows = [];
         for (const att of s.data.attestations) {
           const doc = s.data.claims[att.claim_id];
-          if (!doc || doc.renounced_at || doc.claim_type !== type || att.expires_at <= now) continue;
+          if (!doc || doc.renounced_at || this.isOrphan(s, att.claim_id) || doc.claim_type !== type || att.expires_at <= now) continue;
           rows.push({ att, doc });
         }
         // best assurance, then latest expiry; the first of a type is the default
@@ -1893,11 +1924,11 @@
           const att = s.data.attestations.find(a => a.claim_id === doc.claim_id);
           const pending = s.data.verifications[doc.claim_id];
           return {
-            id: doc.claim_id, type: doc.claim_type, published: !!doc.published_at, renounced: !!doc.renounced_at, renouncedAt: doc.renounced_at || null,
+            id: doc.claim_id, type: doc.claim_type, orphan: Wallet.isOrphan(s, doc.claim_id), published: !!doc.published_at, renounced: !!doc.renounced_at, renouncedAt: doc.renounced_at || null,
             value: typeof doc.value === 'string' ? doc.value : Object.values(doc.value).join(' '),
             verified: !!att, method: att ? att.method : null, assurance: att ? att.assurance : null,
             issuer: att ? (s.data.issuer_chains[att.issuer] && s.data.issuer_chains[att.issuer].name) || att.issuer.slice(0, 12) : null,
-            pending: !!pending, codeable: ['email', 'phone'].includes(doc.claim_type) && !doc.renounced_at,
+            pending: !!pending, codeable: ['email', 'phone'].includes(doc.claim_type) && !doc.renounced_at && !Wallet.isOrphan(s, doc.claim_id),
           };
         });
       },
@@ -1946,6 +1977,12 @@
         const claim = this.claims.find(c => c.id === id);
         if (!window.confirm(`Publish the attestation of your ${claim.type} on the node? Anyone can then see, for example in the explorer, that this identity has a ${claim.type} verified by ${claim.issuer}. The ${claim.type} itself stays private.`)) return;
         await this.run(id, async () => { await Wallet.publishAttestation(this.hash, id); await this.loadDetails(id); }, 'Attestation published.');
+      },
+
+      async forget(id) {
+        const claim = this.claims.find(c => c.id === id);
+        if (!window.confirm(`Remove the ${claim.type} ${claim.value} from this browser? Your identity chain does not have it, so nothing is renounced; add it again to start fresh.`)) return;
+        await this.run(id, () => Wallet.forgetClaim(this.hash, id), 'Removed from this browser.');
       },
 
       async renounce(id) {

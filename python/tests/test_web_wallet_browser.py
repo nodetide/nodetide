@@ -505,3 +505,97 @@ async def test_a_new_version_of_the_app_is_used_on_the_next_load():
             except subprocess.TimeoutExpired:
                 chrome.kill()
         await node.close()
+
+
+async def test_claims_left_over_from_an_earlier_chain_are_flagged_and_can_be_dropped():
+    """A backup restored onto a node that does not have the claims (the identity was re-created there)."""
+    nodes = [TestServer(create_app(storage=Storage.memory(), web_root=str(WEB))) for _ in range(2)]
+    for n in nodes:
+        await n.start_server()
+    first, second = (f"http://127.0.0.1:{n.port}" for n in nodes)
+    chrome = None
+    try:
+        async with aiohttp.ClientSession() as http:
+            chrome = subprocess.Popen(
+                [CHROME, "--headless=new", f"--remote-debugging-port={CDP_PORT + 2}", f"--user-data-dir={tempfile.mkdtemp()}",
+                 "--no-first-run", "--disable-gpu", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            tabs = None
+            for _ in range(50):
+                try:
+                    async with http.get(f"http://127.0.0.1:{CDP_PORT + 2}/json") as r:
+                        tabs = await r.json()
+                        break
+                except aiohttp.ClientError:
+                    await asyncio.sleep(0.2)
+            tab = next(t for t in tabs if t["type"] == "page")
+            async with http.ws_connect(tab["webSocketDebuggerUrl"]) as ws:
+                page = Page(ws)
+                await page.call("Runtime.enable")
+                await page.call("Page.enable")
+
+                async def load(base):
+                    await page.call("Page.navigate", url=base + "/")
+                    for _ in range(100):
+                        if await page.js("!!(window.Alpine && Alpine.store('wallet'))", wait=False):
+                            break
+                        await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.5)
+
+                async def attempt(expr):
+                    await page.js("Alpine.store('app').error=null")
+                    await page.js(f"(async()=>{{{expr}}})()")
+                    return await page.js("Alpine.store('app').error")
+
+                wallet = comp("[x-data=walletUI]")
+                claims = lambda: page.js(f"JSON.parse(JSON.stringify({wallet}.claims))")  # noqa: E731
+
+                # node one: an identity with a claim, and a backup of it
+                await load(first)
+                await page.js("""window.__files=[]; const orig=URL.createObjectURL;
+                    URL.createObjectURL=(b)=>{ b.text().then(t=>window.__files.push(t)); return orig(b); };""", wait=False)
+                await page.js(f"""(async()=>{{const m={comp('[x-data=identityManager]')}; m.createForm={{name:'leftover',
+                    method:'password',password:'leftover-pass-1',confirmPassword:'leftover-pass-1',distributionPoints:''}};
+                    await m.createIdentity();}})()""")
+                await asyncio.sleep(1)
+                identity = await page.js("Alpine.store('identity').activeHash")
+                assert await attempt(f"const c={wallet}; c.password='leftover-pass-1'; await c.unlock();") is None
+                assert await attempt(f"const c={wallet}; c.email='old@example.com'; await c.addEmail();") is None
+                assert (await claims())[0]["orphan"] is False                       # on the chain it is made on
+                assert await attempt(f"const c={comp('[x-data=protectionUI]')}; c.backup={{identityPassword:'leftover-pass-1',"
+                                     "password:'correct horse battery',confirm:'correct horse battery'}; await c.makeBackup();") is None
+                await asyncio.sleep(0.5)
+                backup = (await page.js("window.__files"))[0]
+
+                # node two knows the identity (restoring re-registers it) but never saw the claim
+                await load(second)
+                restored = await attempt(
+                    f"const c={comp('[x-data=settingsManager]')}; c.restoreFile={{text:async()=>{json.dumps(backup)}}};"
+                    "c.restorePassword='correct horse battery'; c.restoreLocalPassword='new-local-pass-9';"
+                    "c.restoreLocalConfirmPassword='new-local-pass-9'; await c.restoreIdentity();")
+                assert restored is None
+                await page.js(f"Alpine.store('identity').setActive({json.dumps(identity)})")
+                await asyncio.sleep(0.5)
+                assert await attempt(f"const c={wallet}; c.password='new-local-pass-9'; await c.unlock();") is None
+                left = await claims()
+                assert len(left) == 1 and left[0]["orphan"] is True and left[0]["codeable"] is False   # flagged, and nothing can be done with it
+
+                assert "left over" in await attempt(f"await {wallet}.verify({json.dumps(left[0]['id'])});")
+                await page.js("window.confirm = () => true")  # (a confirm dialog would block a headless page for good)
+                assert "not on your identity chain" in await attempt(f"await {wallet}.renounce({json.dumps(left[0]['id'])});")
+                assert await attempt(f"await {wallet}.forget({json.dumps(left[0]['id'])});") is None
+                assert await claims() == []
+
+                # and the same address can now be claimed afresh, properly on this chain
+                assert await attempt(f"const c={wallet}; c.email='old@example.com'; await c.addEmail();") is None
+                fresh = await claims()
+                assert len(fresh) == 1 and fresh[0]["orphan"] is False and fresh[0]["id"] != left[0]["id"]
+                assert "on your identity chain" in await attempt(f"await {wallet}.forget({json.dumps(fresh[0]['id'])});")
+    finally:
+        if chrome:
+            chrome.terminate()
+            try:
+                chrome.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                chrome.kill()
+        for n in nodes:
+            await n.close()

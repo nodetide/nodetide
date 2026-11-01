@@ -3,6 +3,12 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (leftovers) - claims the chain does not have are flagged
+
+- On unlock the browser wallet asks the node which claims the identity's chain actually has. A local claim it does not have (typically a restored backup of an
+  earlier chain) is marked "not on your identity chain": it cannot be verified, renounced, published or offered at sign-in, and "Remove from this browser" drops it
+  (nothing on the chain to renounce). If the node cannot be asked, nothing is flagged. Test: `test_claims_left_over_from_an_earlier_chain_are_flagged_and_can_be_dropped`.
+
 ## 2026-11-01 (layout) - claims live in the My Identity tab
 
 - The separate Wallet tab is gone: the identity's claims (add, verify, timeline, renounce, publish), the passkey control and "Organizations you own" are in the **My Identity** tab,
