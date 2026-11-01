@@ -7,13 +7,20 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import eu.kuklin.nodetide.crypto.EncryptionKeyPair
-import eu.kuklin.nodetide.crypto.Hash
+import eu.kuklin.nodetide.crypto.KeySigner
+import eu.kuklin.nodetide.crypto.toHex
+import eu.kuklin.nodetide.protocol.Events
 import eu.kuklin.nodetide.crypto.SigningKeyPair
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 
 private val Context.identityDataStore: DataStore<Preferences> by preferencesDataStore(name = "identity")
 
@@ -38,74 +45,59 @@ class IdentityStore(private val context: Context) {
     val currentIdentity: Flow<LocalIdentity?> get() = identity
 
     /**
-     * Get the cached sigchain.
+     * The cached sigchain as raw events (control chain, then content track).
      */
-    val sigchain: Flow<List<SigchainEvent>> = context.identityDataStore.data.map { prefs ->
-        prefs[SIGCHAIN_KEY]?.let { json.decodeFromString<List<SigchainEvent>>(it) } ?: emptyList()
+    val sigchain: Flow<List<JsonObject>> = context.identityDataStore.data.map { prefs ->
+        prefs[SIGCHAIN_KEY]?.let { decodeEvents(it) } ?: emptyList()
     }
 
+    private fun decodeEvents(text: String): List<JsonObject> =
+        Json.parseToJsonElement(text).jsonArray.map { it.jsonObject }
+
+    private fun encodeEvents(events: List<JsonObject>): String = JsonArray(events).toString()
+
     /**
-     * Create a new identity.
+     * Create a new identity: a master key (which only manages the identity), a device key for daily use that the master
+     * authorizes, and the first two events of the chain (genesis and add_device).
      */
     suspend fun createIdentity(
         name: String?,
         distributionPoints: List<String> = emptyList()
     ): LocalIdentity {
-        val signingKeyPair = SigningKeyPair.generate()
-        val encryptionKeyPair = EncryptionKeyPair.generate()
+        val master = SigningKeyPair.generate()
+        val masterEncryption = EncryptionKeyPair.generate()
+        val device = SigningKeyPair.generate()
+        val deviceEncryption = EncryptionKeyPair.generate()
+        val now = System.currentTimeMillis() / 1000
 
-        val timestamp = System.currentTimeMillis() / 1000
-
-        // Build genesis event (without signature)
-        val genesisData = buildMap {
-            put("type", "genesis")
-            put("timestamp", timestamp)
-            put("pubkey", signingKeyPair.publicKeyHex)
-            put("encryption_pubkey", encryptionKeyPair.publicKeyHex)
-            put("identity_type", "personal")
-            put("signed_by", signingKeyPair.publicKeyHex)
-            if (!name.isNullOrBlank()) put("name", name)
-            if (distributionPoints.isNotEmpty()) put("distribution_points", distributionPoints)
-        }
-
-        // Canonical JSON for signing
-        val signableJson = canonicalJson(genesisData)
-        val signature = signingKeyPair.signHex(signableJson)
-
-        // Compute identity hash
-        val identityHash = Hash.identityHash(signableJson)
+        val genesis = Events.genesis(
+            KeySigner(master), masterEncryption.publicKeyHex, now, name?.takeIf { it.isNotBlank() }, distributionPoints.ifEmpty { null },
+        )
+        val identityHash = Events.identityHash(genesis)
+        val addDevice = Events.addDevice(
+            KeySigner(master), identityHash, now, device.publicKeyHex, deviceEncryption.publicKeyHex, "Android",
+        )
 
         val identity = LocalIdentity(
             identityHash = identityHash,
             name = name,
-            signingSecretKey = signingKeyPair.secretKeyHex,
-            signingPublicKey = signingKeyPair.publicKeyHex,
-            encryptionSecretKey = encryptionKeyPair.secretKey.joinToString("") { "%02x".format(it) },
-            encryptionPublicKey = encryptionKeyPair.publicKeyHex,
+            signingSecretKey = master.secretKeyHex,
+            signingPublicKey = master.publicKeyHex,
+            encryptionSecretKey = masterEncryption.secretKey.toHex(),
+            encryptionPublicKey = masterEncryption.publicKeyHex,
             distributionPoints = distributionPoints,
-            createdAt = timestamp,
-            isDevice = false
+            createdAt = now,
+            isDevice = false,
+            deviceSigningSecretKey = device.secretKeyHex,
+            deviceSigningPublicKey = device.publicKeyHex,
+            deviceEncryptionSecretKey = deviceEncryption.secretKey.toHex(),
+            deviceEncryptionPublicKey = deviceEncryption.publicKeyHex,
         )
 
-        // Create genesis event
-        val genesisEvent = SigchainEvent(
-            type = "genesis",
-            timestamp = timestamp,
-            signedBy = signingKeyPair.publicKeyHex,
-            signature = signature,
-            pubkey = signingKeyPair.publicKeyHex,
-            encryptionPubkey = encryptionKeyPair.publicKeyHex,
-            name = name,
-            identityType = "personal",
-            distributionPoints = distributionPoints.ifEmpty { null }
-        )
-
-        // Save identity and sigchain
         context.identityDataStore.edit { prefs ->
             prefs[IDENTITY_KEY] = json.encodeToString(identity)
-            prefs[SIGCHAIN_KEY] = json.encodeToString(listOf(genesisEvent))
+            prefs[SIGCHAIN_KEY] = encodeEvents(listOf(genesis, addDevice))
         }
-
         return identity
     }
 
@@ -114,24 +106,25 @@ class IdentityStore(private val context: Context) {
      */
     suspend fun attachAsDevice(
         masterIdentityHash: String,
-        masterSigchain: List<SigchainEvent>,
+        masterSigchain: List<JsonObject>,
         deviceLabel: String?
     ): LocalIdentity {
         val signingKeyPair = SigningKeyPair.generate()
         val timestamp = System.currentTimeMillis() / 1000
 
         // Get master identity info from genesis
-        val genesis = masterSigchain.firstOrNull { it.type == "genesis" }
+        val genesis = masterSigchain.firstOrNull { (it["type"] as? JsonPrimitive)?.content == "genesis" }
             ?: throw IllegalArgumentException("No genesis event in sigchain")
+        fun text(key: String) = (genesis[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
         val identity = LocalIdentity(
             identityHash = masterIdentityHash,
-            name = genesis.name,
+            name = text("name"),
             signingSecretKey = signingKeyPair.secretKeyHex,
             signingPublicKey = signingKeyPair.publicKeyHex,
             encryptionSecretKey = null,
-            encryptionPublicKey = genesis.encryptionPubkey,
-            distributionPoints = genesis.distributionPoints ?: emptyList(),
+            encryptionPublicKey = text("encryption_pubkey"),
+            distributionPoints = (genesis["distribution_points"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList(),
             createdAt = timestamp,
             isDevice = true,
             masterIdentityHash = masterIdentityHash
@@ -140,7 +133,7 @@ class IdentityStore(private val context: Context) {
         // Save identity (sigchain will be updated when AddDevice event is submitted)
         context.identityDataStore.edit { prefs ->
             prefs[IDENTITY_KEY] = json.encodeToString(identity)
-            prefs[SIGCHAIN_KEY] = json.encodeToString(masterSigchain)
+            prefs[SIGCHAIN_KEY] = encodeEvents(masterSigchain)
         }
 
         return identity
@@ -149,9 +142,9 @@ class IdentityStore(private val context: Context) {
     /**
      * Update the cached sigchain.
      */
-    suspend fun updateSigchain(events: List<SigchainEvent>) {
+    suspend fun updateSigchain(events: List<JsonObject>) {
         context.identityDataStore.edit { prefs ->
-            prefs[SIGCHAIN_KEY] = json.encodeToString(events)
+            prefs[SIGCHAIN_KEY] = encodeEvents(events)
         }
     }
 
@@ -178,7 +171,7 @@ class IdentityStore(private val context: Context) {
     /**
      * Get sigchain synchronously.
      */
-    suspend fun getSigchain(): List<SigchainEvent> = sigchain.first()
+    suspend fun getSigchain(): List<JsonObject> = sigchain.first()
 
     /**
      * Save identity directly.
@@ -193,35 +186,4 @@ class IdentityStore(private val context: Context) {
      * Clear identity (alias for clear).
      */
     suspend fun clearIdentity() = clear()
-
-    /**
-     * Build canonical JSON for signing (sorted keys, no whitespace).
-     */
-    private fun canonicalJson(data: Map<String, Any?>): String {
-        return buildString {
-            append("{")
-            data.entries
-                .filter { it.value != null }
-                .sortedBy { it.key }
-                .forEachIndexed { index, (key, value) ->
-                    if (index > 0) append(",")
-                    append("\"$key\":")
-                    append(valueToJson(value))
-                }
-            append("}")
-        }
-    }
-
-    private fun valueToJson(value: Any?): String = when (value) {
-        null -> "null"
-        is String -> "\"$value\""
-        is Number -> value.toString()
-        is Boolean -> value.toString()
-        is List<*> -> "[" + value.joinToString(",") { valueToJson(it) } + "]"
-        is Map<*, *> -> canonicalJson(value.mapKeys { it.key.toString() }.mapValues { it.value })
-        else -> "\"$value\""
-    }
 }
-
-// Extension to fix the encryption key hex encoding
-private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

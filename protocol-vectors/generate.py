@@ -246,6 +246,56 @@ few.append(recovery_event(tr[:1]))
 add("recovery-too-few", "one of three trustees is not enough", few, related=trustee_chains, valid=False)
 add("recovery-needs-trustee-chains", "the trustees' chains are needed to check the signatures", enough, related={}, valid=False)
 
+
+# ---- builder vectors: the exact events a client must produce from fixed inputs ---------------------------------------
+# Ed25519 signatures are deterministic, so an implementation that builds the same body from the same seeds and
+# timestamps must reproduce the events byte for byte, signatures included.
+from nodetide.core.crypto import EncryptionPrivateKey, SigningKey  # noqa: E402
+
+MASTER_SEED = bytes(range(1, 33))
+DEVICE_SEED = bytes(range(101, 133))
+ENC_SEED = bytes(range(201, 233))
+DEVICE_ENC_SEED = bytes(range(151, 183))
+master_kp = KeyPair(signing_key=SigningKey.from_bytes(MASTER_SEED), encryption_key=EncryptionPrivateKey.from_bytes(ENC_SEED))
+device_kp = KeyPair(signing_key=SigningKey.from_bytes(DEVICE_SEED), encryption_key=EncryptionPrivateKey.from_bytes(DEVICE_ENC_SEED))
+
+_tick = [1_700_000_000]
+real_time = time.time
+
+
+def fake_time():
+    _tick[0] += 10
+    return _tick[0]
+
+
+time.time = fake_time
+try:
+    caps = [D.SIGN_MESSAGES, D.ENCRYPT, D.AUTHENTICATE, D.MANAGE_CLAIMS]
+    b = Identity(sigchain=Sigchain(events=[GenesisEvent.create(master_kp, name="Алекс \x7f \"q\" 😀", distribution_points=None)]),
+                 local_keypair=master_kp)
+    b.authorize_device(device_kp.verify_key.to_hex(), device_kp.public_encryption_key.to_hex(), "phone", capabilities=caps)
+    b.add_claim("claim-id-0000000001", "email", "11" * 32)
+    b.add_claim("claim-id-0000000002", "phone", "22" * 32, signer=device_kp.signing_key)
+    b.checkpoint()
+    b.add_claim("claim-id-0000000003", "email", "33" * 32)
+    b.set_claim_order("email", ["claim-id-0000000003", "claim-id-0000000001"])
+    b.revoke_claim("claim-id-0000000002", "gone")
+    b.revoke_device(device_kp.verify_key.to_hex(), "lost")
+    assert b.verify() == (True, None)
+    BUILDERS = {
+        "master_seed": MASTER_SEED.hex(), "device_seed": DEVICE_SEED.hex(),
+        "master_encryption_pubkey": master_kp.public_encryption_key.to_hex(),
+        "device_encryption_pubkey": device_kp.public_encryption_key.to_hex(),
+        "base_timestamp": 1_700_000_000, "name": "Алекс \x7f \"q\" 😀",
+        "events": b.sigchain.to_list(),          # control events first, then content: the order the steps happened is below
+        "steps": [
+            "genesis", "add_device", "add_claim 1 (master)", "add_claim 2 (device)", "checkpoint",
+            "add_claim 3", "set_claim_order", "revoke_claim 2", "revoke_device",
+        ],
+    }
+finally:
+    time.time = real_time
+
 out = ROOT / "protocol-vectors" / "chain-v2.json"
-out.write_text(json.dumps({"format": "nodetide-chain-vectors", "version": 2, "now": NOW, "cases": CASES}, indent=1, sort_keys=True) + "\n")
+out.write_text(json.dumps({"format": "nodetide-chain-vectors", "version": 2, "now": NOW, "cases": CASES, "builders": BUILDERS}, indent=1, sort_keys=True) + "\n")
 print(f"wrote {len(CASES)} cases to {out.relative_to(ROOT)}")

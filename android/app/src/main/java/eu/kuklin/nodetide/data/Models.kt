@@ -3,6 +3,7 @@ package eu.kuklin.nodetide.data
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Local identity stored on device.
@@ -18,32 +19,45 @@ data class LocalIdentity(
     val distributionPoints: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis() / 1000,
     val isDevice: Boolean = false,  // True if attached as device, false if master
-    val masterIdentityHash: String? = null  // If device, the master identity hash
+    val masterIdentityHash: String? = null,  // If device, the master identity hash
+    // The key used every day. The master key (above) only manages the identity: it authorizes this one.
+    val deviceSigningSecretKey: String? = null,
+    val deviceSigningPublicKey: String? = null,
+    val deviceEncryptionSecretKey: String? = null,
+    val deviceEncryptionPublicKey: String? = null,
 )
 
 /**
- * Sigchain event types.
+ * A sigchain event as the screens show it. The events themselves are kept as raw JSON ([raw]): the identity hash and every
+ * signature are over the exact canonical form, so they must never be squeezed through a lossy class.
  */
-@Serializable
-data class SigchainEvent(
+data class ChainEvent(
     val type: String,
     val timestamp: Long,
-    @SerialName("signed_by") val signedBy: String,
+    val signedBy: String,
     val signature: String,
-    // Genesis fields
-    val pubkey: String? = null,
-    @SerialName("encryption_pubkey") val encryptionPubkey: String? = null,
-    val name: String? = null,
-    @SerialName("identity_type") val identityType: String? = null,
-    @SerialName("distribution_points") val distributionPoints: List<String>? = null,
-    // AddDevice fields
-    @SerialName("device_pubkey") val devicePubkey: String? = null,
-    val label: String? = null,
-    val capabilities: List<String>? = null,
-    // Other fields as needed
-    val seq: Int? = null,
-    val prev: String? = null
+    val prev: String?,
+    val seq: Int?,
+    /** "control" (keys, devices, trust, commitments) or "content" (claims). */
+    val track: String,
+    val raw: JsonObject,
 )
+
+fun JsonObject.toChainEvent(): ChainEvent {
+    fun text(key: String) = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    fun num(key: String) = (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toLongOrNull()
+    val type = text("type") ?: "?"
+    return ChainEvent(
+        type = type,
+        timestamp = num("timestamp") ?: 0L,
+        signedBy = text("signed_by") ?: "",
+        signature = text("signature") ?: "",
+        prev = text("prev"),
+        seq = num("seq")?.toInt(),
+        track = if (type == "add_claim" || type == "set_claim_order") "content" else "control",
+        raw = this,
+    )
+}
 
 /**
  * Identity information from server.

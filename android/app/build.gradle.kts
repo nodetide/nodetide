@@ -41,6 +41,9 @@ android {
 }
 
 dependencies {
+    // The wire protocol (canonical JSON, Merkle commitments, sigchain v2 events and their verification), tested on the JVM
+    implementation(project(":protocol"))
+
     // Core Android
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.appcompat:appcompat:1.8.0")

@@ -31,8 +31,5 @@ object Hash {
 
     fun blake2b256Hex(data: String): String = blake2b256Hex(data.toByteArray(Charsets.UTF_8))
 
-    /**
-     * Compute identity hash from genesis event JSON.
-     */
-    fun identityHash(genesisJson: String): String = blake2b256Hex(genesisJson)
+    // (The identity hash is sha256 of the whole SIGNED genesis event in canonical JSON: see protocol Events.identityHash.)
 }

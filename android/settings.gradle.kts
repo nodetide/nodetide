@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Nodetide"
 include(":app")
+include(":protocol")

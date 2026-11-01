@@ -11,10 +11,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import eu.kuklin.nodetide.NodetideApp
-import eu.kuklin.nodetide.crypto.Hash
-import eu.kuklin.nodetide.crypto.SigningKeyPair
-import eu.kuklin.nodetide.data.LocalIdentity
-import eu.kuklin.nodetide.data.SigchainEvent
 import eu.kuklin.nodetide.ui.Screen
 import kotlinx.coroutines.launch
 
@@ -39,64 +35,23 @@ fun CreateIdentityScreen(navController: NavController) {
             error = null
 
             try {
-                // Generate keypair
-                val keyPair = SigningKeyPair.generate()
-                val publicKeyHex = keyPair.publicKey.joinToString("") { "%02x".format(it) }
-                val timestamp = System.currentTimeMillis() / 1000
-
-                // Calculate identity hash (hash of pubkey)
-                val identityHash = Hash.blake2b(keyPair.publicKey)
-                    .joinToString("") { "%02x".format(it) }
-
-                // Build canonical JSON for signing
-                val signableData = buildString {
-                    append("{")
-                    append("\"identity_type\":\"individual\",")
-                    append("\"name\":\"$name\",")
-                    append("\"pubkey\":\"$publicKeyHex\",")
-                    append("\"signed_by\":\"$publicKeyHex\",")
-                    append("\"timestamp\":$timestamp,")
-                    append("\"type\":\"genesis\"")
-                    append("}")
-                }
-
-                val signature = keyPair.sign(signableData.toByteArray())
-                    .joinToString("") { "%02x".format(it) }
-
-                // Create genesis event with correct field names
-                val signedEvent = SigchainEvent(
-                    type = "genesis",
-                    timestamp = timestamp,
-                    signedBy = publicKeyHex,
-                    signature = signature,
-                    pubkey = publicKeyHex,
-                    name = name,
-                    identityType = "individual",
-                    seq = 1
-                )
-
-                // Submit to relay if connected
+                // Keys, genesis and the first device are made by the protocol module; the screen only publishes them.
+                val identity = identityStore.createIdentity(name.trim())
                 val client = NodetideApp.instance.getApiClient()
                 if (client != null) {
-                    val result = client.createIdentity(signedEvent)
-                    result.onFailure { e ->
-                        error = "Failed to submit to relay: ${e.message}"
+                    val chain = identityStore.getSigchain()
+                    var refused: Throwable? = client.createIdentity(chain.first()).exceptionOrNull()
+                    for (event in chain.drop(1)) {
+                        if (refused != null) break
+                        refused = client.submitEvent(identity.identityHash, event).exceptionOrNull()
+                    }
+                    if (refused != null) {
+                        identityStore.clearIdentity() // nothing half-made is kept when the node says no
+                        error = "The node did not accept the identity: ${refused.message}"
                         isCreating = false
                         return@launch
                     }
                 }
-
-                // Save locally
-                val secretKeyHex = keyPair.secretKey.joinToString("") { "%02x".format(it) }
-                val identity = LocalIdentity(
-                    identityHash = identityHash,
-                    name = name,
-                    signingPublicKey = publicKeyHex,
-                    signingSecretKey = secretKeyHex,
-                    encryptionSecretKey = null,
-                    encryptionPublicKey = null
-                )
-                identityStore.saveIdentity(identity)
 
                 // Navigate back
                 navController.navigate(Screen.Identity.route) {

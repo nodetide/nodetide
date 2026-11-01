@@ -12,6 +12,7 @@ kotlin {
 dependencies {
     api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
     testImplementation(kotlin("test"))
+    testImplementation("org.bouncycastle:bcprov-jdk18on:1.86")   // Ed25519 on the JVM, for the tests only (the app uses libsodium)
     testImplementation("org.junit.jupiter:junit-jupiter:5.14.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

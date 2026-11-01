@@ -17,7 +17,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import eu.kuklin.nodetide.NodetideApp
-import eu.kuklin.nodetide.data.SigchainEvent
+import eu.kuklin.nodetide.data.ChainEvent
+import eu.kuklin.nodetide.data.toChainEvent
 import eu.kuklin.nodetide.ui.Screen
 import kotlinx.coroutines.launch
 
@@ -29,7 +30,8 @@ fun IdentityScreen(navController: NavController) {
 
     val identity by identityStore.currentIdentity.collectAsState(initial = null)
 
-    var sigchain by remember { mutableStateOf<List<SigchainEvent>>(emptyList()) }
+    var sigchain by remember { mutableStateOf<List<ChainEvent>>(emptyList()) }
+    var verification by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showRaw by remember { mutableStateOf(false) }
@@ -42,8 +44,9 @@ fun IdentityScreen(navController: NavController) {
             isLoading = true
             error = null
             val result = client.getSigchain(id.identityHash)
-            result.onSuccess { events ->
-                sigchain = events
+            result.onSuccess { download ->
+                sigchain = download.events.map { it.toChainEvent() }
+                verification = if (download.verified) "verified" else "NOT verified: ${download.problem}"
             }.onFailure { e ->
                 error = e.message
             }
@@ -188,7 +191,7 @@ fun IdentityScreen(navController: NavController) {
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "${sigchain.size} events",
+                            text = "${sigchain.size} events" + (verification?.let { ", $it" } ?: ""),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -234,7 +237,7 @@ private fun InfoRow(label: String, value: String) {
 }
 
 @Composable
-private fun SigchainEventCard(event: SigchainEvent, showRaw: Boolean) {
+private fun SigchainEventCard(event: ChainEvent, showRaw: Boolean) {
     val dateFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
 
     Card(
@@ -249,7 +252,7 @@ private fun SigchainEventCard(event: SigchainEvent, showRaw: Boolean) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "${event.seq ?: 1} - ${event.type}",
+                    text = "${event.type} (${event.track})" + (event.seq?.let { " #$it" } ?: ""),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -286,16 +289,7 @@ private fun SigchainEventCard(event: SigchainEvent, showRaw: Boolean) {
                     shape = MaterialTheme.shapes.small
                 ) {
                     Text(
-                        text = """
-                            {
-                              "type": "${event.type}",
-                              "seq": ${event.seq ?: "null"},
-                              "timestamp": ${event.timestamp},
-                              "signed_by": "${event.signedBy}",
-                              "signature": "${event.signature.take(32)}...",
-                              "prev": ${event.prev?.let { "\"$it\"" } ?: "null"}
-                            }
-                        """.trimIndent(),
+                        text = event.raw.toString(),
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(8.dp)
