@@ -1073,10 +1073,75 @@
       if (info.status === 200 && info.json.issuer === att.issuer) {
         s.data.issuer_chains[att.issuer] = { name: info.json.name || null, sigchain: info.json.sigchain, owner_sigchains: info.json.owner_sigchains || {} };
       }
-      s.data.attestations = s.data.attestations.filter(a => a.id !== att.id).concat([att]);
+      s.data.attestations = s.data.attestations.filter(a => !(a.claim_id === att.claim_id && a.method === att.method)).concat([att]);
       delete s.data.verifications[claimId];
       await this.save(hash);
       return att;
+    },
+
+    // ---- sign in with this wallet (the node's OIDC page opens /signin?link=<challenge url>) ----
+    challengeUrl(link) {
+      let text = (link || '').trim();
+      if (text.startsWith('nodetide://')) text = new URL(text.replace('nodetide://', 'https://x/')).searchParams.get('challenge_url') || '';
+      let url;
+      try { url = new URL(text); } catch { throw new Error('That is not a sign-in address'); }
+      if (url.origin !== window.location.origin) throw new Error('This wallet signs in only to its own node (' + window.location.host + ')');
+      return url.href;
+    },
+
+    async signinPreview(hash, link) {
+      const s = this.session(hash);
+      const response = await fetch(this.challengeUrl(link));
+      if (!response.ok) throw new Error('Cannot fetch the sign-in challenge (' + response.status + '); it may have expired');
+      const challenge = await response.json();
+      const asked = (challenge.display.claims_requested || []).map(c => c.claim_type);
+      const now = Math.floor(Date.now() / 1000);
+      const candidates = [];
+      for (const type of new Set(asked)) {
+        const rows = [];
+        for (const att of s.data.attestations) {
+          const doc = s.data.claims[att.claim_id];
+          if (!doc || doc.claim_type !== type || att.expires_at <= now) continue;
+          rows.push({ att, doc });
+        }
+        // best assurance, then latest expiry; the first of a type is the default
+        const rank = { low: 0, substantial: 1, high: 2 };
+        rows.sort((a, b) => (rank[b.att.assurance] - rank[a.att.assurance]) || (b.att.expires_at - a.att.expires_at));
+        rows.forEach((r, i) => candidates.push({
+          attestation_id: null, att: r.att, claim_id: r.doc.claim_id, claim_type: type, method: r.att.method,
+          assurance: r.att.assurance, expires_at: r.att.expires_at,
+          value: typeof r.doc.value === 'string' ? r.doc.value : Object.values(r.doc.value).join(' '), default: i === 0,
+        }));
+      }
+      for (const c of candidates) c.attestation_id = await sha256(canonicalize(c.att));
+      return {
+        challenge, candidates, client: challenge.display.client_name, issuer: challenge.display.issuer,
+        claimsRequested: challenge.display.claims_requested || [],
+        candidateView: candidates.map(({ att, ...rest }) => rest),
+      };
+    },
+
+    async signinApprove(hash, preview, shareIds) {
+      const s = this.session(hash);
+      await this.ensureDeviceMayAuthenticate(hash);
+      const chosen = preview.candidates.filter(c => shareIds.includes(c.attestation_id));
+      const types = chosen.map(c => c.claim_type);
+      if (new Set(types).size !== types.length) throw new Error('Choose one value per claim type (for example one email), not several');
+      const presentations = chosen.map(c => {
+        const item = { document: s.data.claims[c.claim_id], attestation: c.att };
+        const issuer = s.data.issuer_chains[c.att.issuer];
+        if (issuer) item.issuer_sigchain = issuer.sigchain;
+        return item;
+      });
+      const assertion = await this.assertion(hash, preview.challenge.request, null);
+      const { events } = await this.chain(hash);
+      const response = await fetch(preview.challenge.respond_url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assertion, sigchain: events, presentations }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || body.error || 'The sign-in was refused (' + response.status + ')');
+      return body;
     },
 
     // ---- backup support ----
@@ -1370,6 +1435,71 @@
       openBackup() { this.showBackup = true; },
       openRecovery() { this.showRecovery = true; },
     });
+
+    // Sign in with this wallet
+    Alpine.data('signinUI', () => ({
+      link: '',
+      password: '',
+      preview: null,
+      picks: {},
+      done: null,
+
+      get hash() { return Alpine.store('identity').activeHash; },
+      get unlocked() { return Alpine.store('wallet').unlocked; },
+
+      init() {
+        const url = new URL(window.location.href);
+        if (url.pathname === '/signin' && url.searchParams.get('link')) {
+          this.link = url.searchParams.get('link');
+          history.replaceState(null, '', '/');
+          Alpine.store('app').setView('signin');
+          this.$nextTick(() => this.load());
+        }
+      },
+
+      async load() {
+        if (!this.unlocked || !this.link) return;
+        const app = Alpine.store('app');
+        try {
+          this.preview = await Wallet.signinPreview(this.hash, this.link);
+          this.picks = {};
+          for (const c of this.preview.candidateView) if (c.default) this.picks[c.claim_type] = c.attestation_id;
+        } catch (e) {
+          app.showError(e.message);
+        }
+      },
+
+      async unlock() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          await Wallet.unlock(this.hash, this.password);
+          this.password = '';
+          await this.load();
+        } catch (e) {
+          app.showError('Could not unlock: ' + e.message);
+        } finally {
+          app.loading = false;
+        }
+      },
+
+      async approve() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          const ids = Object.values(this.picks).filter(Boolean);
+          this.done = await Wallet.signinApprove(this.hash, this.preview, ids);
+          this.preview = null;
+          app.showSuccess(this.done.message || 'Signed in. You can go back to the site.');
+        } catch (e) {
+          app.showError(e.message);
+        } finally {
+          app.loading = false;
+        }
+      },
+
+      cancel() { this.preview = null; this.link = ''; Alpine.store('app').setView('wallet'); },
+    }));
 
     // Wallet view: claims, verification, attestations
     Alpine.data('walletUI', () => ({

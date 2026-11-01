@@ -8,14 +8,20 @@ import asyncio
 import json
 import os
 import re
+import socket
 import subprocess
 import tempfile
+import hashlib
+import base64
+import secrets
+from urllib.parse import parse_qs, quote, urlsplit
 
 import aiohttp
 from aiohttp.test_utils import TestServer
 
 from nodetide.api.app import create_app
 from nodetide.core.storage import Storage
+from nodetide.oidc import OIDCClient, OIDCConfig
 from nodetide.verifiers import EmailVerifier, NodeIssuer
 from nodetide.verifiers.mail import MemorySender
 from nodetide.verifiers.service import create_verifier_app
@@ -29,9 +35,15 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
     verifier_server = TestServer(create_verifier_app(verifier_storage, verifier, "https://verifier.test"))
     await verifier_server.start_server()
     monkeypatch.setenv("NODETIDE_WEB_VERIFIER_URL", f"http://127.0.0.1:{verifier_server.port}")
-    node = TestServer(create_app(storage=Storage.memory(), web_root=str(WEB)))
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    base = issuer = f"http://127.0.0.1:{port}"
+    redirect = "https://app.example.com/cb"
+    config = OIDCConfig(issuer=issuer, clients={"spa": OIDCClient("spa", "Demo SPA", (redirect,))},
+                        email_issuers=[verifier.issuer.identity_hash])
+    node = TestServer(create_app(storage=Storage.memory(), web_root=str(WEB), oidc_config=config), port=port)
     await node.start_server()
-    base = f"http://127.0.0.1:{node.port}"
     chrome = None
     try:
         async with aiohttp.ClientSession() as http:
@@ -65,6 +77,7 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                     await page.js(f"(async()=>{{{expr}}})()")
                     return await page.js("Alpine.store('app').error")
 
+                attempt_js = attempt
                 wallet = comp("[x-data=walletUI]")
                 await load()
                 await page.js("""window.__files=[]; const orig=URL.createObjectURL;
@@ -111,6 +124,50 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
                 async with http.get(f"{base}/api/identities/{identity}") as r:
                     info = await r.json()
                 assert any("authenticate" in d["capabilities"] and "manage_claims" in d["capabilities"] for d in info["devices"])
+
+
+                # --- sign in to an application with this wallet (the node's OIDC page links to /signin?link=...) ---------
+                code_verifier = secrets.token_urlsafe(32)
+                code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).rstrip(b"=").decode()
+                async with http.get(f"{base}/oidc/authorize", allow_redirects=False, params={
+                        "client_id": "spa", "redirect_uri": redirect, "response_type": "code", "scope": "openid profile email",
+                        "state": "st", "nonce": "n", "code_challenge": code_challenge, "code_challenge_method": "S256"}) as r:
+                    assert r.status == 302
+                    login_path, _, login_secret = r.headers["Location"].partition("#")
+                    login_id = login_path.rsplit("/", 1)[1]
+                challenge_url = f"{issuer}/oidc/login/{login_id}/challenge"
+                await page.call("Page.navigate", url=f"{base}/signin?link={quote(challenge_url, safe='')}")
+                for _ in range(100):
+                    if await page.js("!!(window.Alpine && Alpine.store('wallet'))", wait=False):
+                        break
+                    await asyncio.sleep(0.2)
+                await asyncio.sleep(0.8)
+                signin = comp("[x-data=signinUI]")
+                assert await page.js("Alpine.store('app').currentView") == "signin"
+                assert await page.js("window.location.pathname") == "/"  # the link was consumed, not left in the address bar
+                assert await attempt_js(f"const c={signin}; c.password='nope'; await c.unlock();") is not None
+                assert await attempt_js(f"const c={signin}; c.password='wallet-pass-12'; await c.unlock();") is None
+                await asyncio.sleep(0.8)
+                view = await page.js(f"JSON.parse(JSON.stringify({signin}.preview.candidateView))")
+                assert await page.js(f"{signin}.preview.client") == "Demo SPA"
+                assert [c["claim_type"] for c in view] == ["email"] and view[0]["value"] == "Alice@example.com" and view[0]["default"] is True
+                # a sign-in for a different origin is refused outright
+                assert "only to its own node" in await attempt_js(
+                    f"const c={signin}; c.link='https://evil.example/oidc/login/x/challenge'; await c.load();")
+                assert await attempt_js(f"const c={signin}; await c.approve();") is None
+                async with http.get(f"{base}/oidc/login/{login_id}/status", headers={"X-Login-Secret": login_secret}) as r:
+                    status = await r.json()
+                assert status["status"] == "approved", status
+                code = parse_qs(urlsplit(status["redirect_to"]).query)["code"][0]
+                async with http.post(f"{base}/oidc/token", data={
+                        "grant_type": "authorization_code", "code": code, "redirect_uri": redirect, "client_id": "spa",
+                        "code_verifier": code_verifier}) as r:
+                    tokens = await r.json()
+                async with http.get(f"{base}/oidc/userinfo", headers={"Authorization": f"Bearer {tokens['access_token']}"}) as r:
+                    userinfo = await r.json()
+                assert userinfo["sub"] == identity and userinfo["email"] == "Alice@example.com" and userinfo["email_verified"] is True
+
+                await load()
 
                 # a reload drops the keys from memory; the data stays, encrypted
                 stored = await page.js(f"JSON.stringify(Object.entries(localStorage).filter(([k])=>k.startsWith('nodetide_wallet_')))")

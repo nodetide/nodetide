@@ -237,6 +237,8 @@ def create_app(
                 return web.FileResponse(web_path / "index.html")
 
             app.router.add_get("/", index_handler)
+            # the node's sign-in page opens "<wallet>/signin?link=<challenge url>": the client reads it itself
+            app.router.add_get("/signin", index_handler)
 
             # Serve specific static directories
             if (web_path / "js").exists():

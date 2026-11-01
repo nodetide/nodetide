@@ -248,7 +248,9 @@ async def mailbox_code(http: aiohttp.ClientSession, base: str, address: str, sin
 async def run() -> int:
     env = load_env()
     check = Check()
-    node, rp, wallet_url = env["NODE_URL"], env["RP_URL"], env["WALLET_URL"]
+    node, rp = env["NODE_URL"], env["RP_URL"]
+    # the server-side test wallet is not public: smoke talks to it on the loopback port (start it with --profile hosted-wallet)
+    wallet_url = f"http://127.0.0.1:{env.get('WALLET_PORT') or '4572'}"
     auth_header = "Basic " + base64.b64encode(f"wallet:{env['WALLET_PASSWORD']}".encode()).decode()
     resolver = PinLocal()
     eid = (SMOKE / "signer.json").exists()

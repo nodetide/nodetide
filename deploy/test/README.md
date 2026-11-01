@@ -21,7 +21,7 @@ browser ──► rp (oauth2-proxy) ──► "Signed in" page (shows the claims
 |---|---|---|---|
 | `node` | the Python node from this repo | `nt-node.<domain>` | 4570 |
 | `rp` | oauth2-proxy + a page that prints the received claims | `nt-rp.<domain>` | 4571 |
-| `wallet` | test wallet (HTTP basic auth, user `wallet`) | `nt-wallet.<domain>` | 4572 |
+| `wallet` | opt-in server-side test wallet (`--profile hosted-wallet`; not public: 127.0.0.1 only, HTTP basic auth) | none | 4572 |
 | `grafana` | Grafana with native OIDC: an ordinary third-party app as the guinea pig | `nt-grafana.<domain>` | 4574 |
 | `verifier` | independent email verification service: own storage, own issuer identity | `nt-verifier.<domain>` | 4575 |
 | `mailpit` | catch-all mailbox for the verifier's mail (private; SSH tunnel to read it) | - | 4573 |
@@ -35,12 +35,12 @@ Everything binds to `127.0.0.1`. The browser and the containers use the very sam
 ```sh
 cd deploy/test
 ./init.sh --local                 # .env + config/, URLs under *.localtest.me:8080 (plain http)
-docker compose up -d --build      # the edge profile is on in local mode
+docker compose --profile hosted-wallet up -d --build   # the edge profile is on in local mode; smoke.py drives the hosted wallet
 python3 smoke.py run              # needs the repo's Python env (nodetide, aiohttp)
 ```
 
-Then open `http://nt-rp.localtest.me:8080`: you are sent to the Nodetide sign-in page. Open the wallet at
-`http://nt-wallet.localtest.me:8080` (password: `WALLET_PASSWORD` in `.env`), paste the sign-in address,
+Then open `http://nt-rp.localtest.me:8080`: you are sent to the Nodetide sign-in page. Open the wallet (the web client at
+`http://nt-node.localtest.me:8080`; the "Open in wallet" link does it), unlock it,
 choose which claims to reveal, approve, and the first tab shows what the application received.
 
 `smoke.py prepare` makes a synthetic "eID" CA so the legal-name path runs without a card. It edits `.env`;
@@ -97,7 +97,8 @@ wallet's volume does keep the attestation file, so `docker compose down -v` when
 ## Security notes
 
 - `.env`, `config/`, `anchors/` and `.smoke/` are git-ignored and excluded from the Docker build context.
-- The wallet's keys are development keys; its password is the only thing between the internet and that identity.
+- The wallet is the web client at `nt-node.<domain>`: keys and claim values stay in your browser (encrypted, unlocked in memory only). The
+  optional server-side test wallet (`hosted-wallet` profile) has development keys and listens on 127.0.0.1 only; reach it with an ssh tunnel.
 - `NODETIDE_OIDC_ALLOW_INSECURE` (plain http) exists only for the local profile and is `0` for a domain.
 
 ## Server on Hetzner

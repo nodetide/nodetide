@@ -20,9 +20,15 @@ still open, so a new session can pick up without re-deriving context.
   the node rejects. The web client's device was also given capabilities that do not exist (`sign`, `decrypt`); it now gets `authenticate` and
   `manage_claims` (an existing web identity is re-authorized the first time it verifies a claim).
 
+- **Sign in with the browser wallet**: the node's sign-in page links to `/signin?link=...` (the node serves the client there); the client previews what the
+  site asks, offers one attestation per claim type (best assurance first), signs the assertion with the device key and posts it with the presentations
+  and issuer chains. It only signs in to its own node. Tested end to end against the real OIDC bridge (the verified email reaches `userinfo`).
+- **No public wallet**: the Caddy route, DNS record (`nt-wallet`) and the node's wallet link are gone; the OIDC page offers the web client. The old
+  server-side wallet is the opt-in compose profile `hosted-wallet` (127.0.0.1:4572, ssh tunnel), still used by `smoke.py` and for the eID statement flow.
+
 ### Open
-- Sign-in approval in the browser, then removing the public `nt-wallet` service (still behind its password until then); eID statements, birth date,
-  legal name UI; a content security policy for the web client; `navigator.storage.persist()`.
+- Browser UI for eID statements, legal name, birth date and age claims (only the hosted/local wallet has them); device pairing and claim sync between
+  browsers; a content security policy for the web client; `navigator.storage.persist()`.
 
 ## 2026-11-01 (owners) - organization identities owned by weighted owner identities
 

@@ -38,7 +38,7 @@ services:
       NODETIDE_OIDC_KEY_FILE: /data/oidc_signing_key.pem
       NODETIDE_OIDC_ALLOW_INSECURE: ${ALLOW_INSECURE:-0}
       # the sign-in page offers "open in wallet" for the stack's wallet and for one on the user's own machine
-      NODETIDE_OIDC_WALLET_URLS: ${WALLET_URL},http://localhost:${LOCAL_WALLET_PORT:-4572}
+      NODETIDE_OIDC_WALLET_URLS: ${NODE_URL},http://localhost:${LOCAL_WALLET_PORT:-4572}   # the web client is the wallet
       # This node verifies nobody. It believes email attestations only from the verification service named in
       # /issuer/email-issuer (written by the verifier container; the entrypoint passes it on as NODETIDE_OIDC_EMAIL_ISSUERS).
     volumes:
@@ -116,8 +116,11 @@ services:
     ports:
       - "127.0.0.1:${MAIL_PORT:-4573}:8025"   # catch-all mailbox UI (only holds the verifier's mail); keep it private
 
+  # Opt-in (`docker compose --profile hosted-wallet up -d wallet`): a wallet that keeps its keys ON THE SERVER, used by
+  # smoke.py and for the eID statement flow. Not public: no edge route, no DNS name, 127.0.0.1 only (ssh tunnel).
   wallet:
     <<: [*hosts, *image]
+    profiles: ["hosted-wallet"]
     restart: unless-stopped
     command: ["python", "/opt/wallet/app.py"]
     environment:

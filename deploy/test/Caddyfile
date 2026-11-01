@@ -7,9 +7,8 @@
 	reverse_proxy rp:4180
 }
 
-{$WALLET_SITE} {
-	reverse_proxy wallet:4572
-}
+# No public wallet: the Nodetide web client served by the node is the wallet (keys stay in the browser). The old
+# server-side test wallet is the opt-in `hosted-wallet` profile and is reachable only on 127.0.0.1:4572 (ssh tunnel).
 
 {$GRAFANA_SITE} {
 	reverse_proxy grafana:3000

@@ -139,6 +139,6 @@ write_clients "$CLIENT_SECRET" "$GRAFANA_SECRET" "$SCHEME://$RP_HOST$PORT" "$SCH
 echo "wrote .env and config/clients.json"
 echo "  node:   $SCHEME://$NODE_HOST$PORT    (explorer at /explorer/)"
 echo "  rp:     $SCHEME://$RP_HOST$PORT      (sign in with Nodetide, see the claims it receives)"
-echo "  wallet: $SCHEME://$WALLET_HOST$PORT  (user 'wallet', password in .env as WALLET_PASSWORD)"
+echo "  wallet: the web client at $SCHEME://$NODE_HOST$PORT (keys stay in your browser); the server-side test wallet is opt-in: --profile hosted-wallet, 127.0.0.1:4572 only"
 echo "  verifier: $SCHEME://$VERIFIER_HOST$PORT  (independent email verification service with its own issuer identity)"
 echo "  grafana: $SCHEME://$GRAFANA_HOST$PORT  (an ordinary application with native OIDC; local admin password in .env)"

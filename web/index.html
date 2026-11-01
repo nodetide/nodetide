@@ -1131,6 +1131,55 @@
       </div>
     </div>
 
+    <!-- Sign-in approval: opened by the node's sign-in page (/signin?link=...) -->
+    <div x-show="$store.app.currentView === 'signin'" x-data="signinUI" x-effect="$store.wallet.unlocked; load()" x-cloak>
+      <div class="card" x-show="!$store.identity.activeHash">
+        <p class="text-muted">Create or choose an identity first, then open the sign-in page again.</p>
+      </div>
+      <div class="card" x-show="$store.identity.activeHash && !unlocked">
+        <div class="card-header"><span class="card-title">Unlock to sign in</span></div>
+        <form @submit.prevent="unlock">
+          <div class="form-group">
+            <label>Identity password</label>
+            <input type="password" x-model="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn" :disabled="$store.app.loading">Unlock</button>
+        </form>
+      </div>
+      <div class="card" x-show="unlocked && preview">
+        <div class="card-header"><span class="card-title">Sign in to <span x-text="preview && preview.client"></span></span></div>
+        <p class="text-small text-muted mb-1">Only approve this if you started it just now. It signs a one-time answer; your keys stay here.</p>
+        <p x-show="preview && preview.candidateView.length === 0" class="text-small">
+          This site asks for nothing you can show yet<template x-if="preview && preview.claimsRequested.length"> (it asked for <span x-text="preview.claimsRequested.map(c => c.claim_type).join(', ')"></span>)</template>.
+          You can still sign in without sharing claims.
+        </p>
+        <template x-if="preview">
+          <div>
+            <template x-for="type in [...new Set(preview.candidateView.map(c => c.claim_type))]" :key="type">
+              <div class="mb-1">
+                <strong x-text="type"></strong>
+                <template x-for="c in preview.candidateView.filter(c => c.claim_type === type)" :key="c.attestation_id">
+                  <label style="display: block">
+                    <input type="radio" :name="'pick-' + type" :value="c.attestation_id" x-model="picks[type]">
+                    <span x-text="c.value"></span>
+                    <span class="text-small text-muted">(<span x-text="c.method"></span>, <span x-text="c.assurance"></span>)</span>
+                  </label>
+                </template>
+                <label style="display: block"><input type="radio" :name="'pick-' + type" value="" x-model="picks[type]"> share nothing of this type</label>
+              </div>
+            </template>
+            <div class="flex gap-1">
+              <button class="btn" @click="approve()" :disabled="$store.app.loading">Approve sign-in</button>
+              <button class="btn btn-secondary" @click="cancel()">Cancel</button>
+            </div>
+          </div>
+        </template>
+      </div>
+      <div class="card" x-show="done">
+        <p>Done. You can return to the site that asked.</p>
+      </div>
+    </div>
+
     <!-- Wallet view: claims and their verification, kept in this browser -->
     <div x-show="$store.app.currentView === 'wallet'" x-data="walletUI" x-effect="$store.wallet.unlocked; $store.identity.activeHash; refresh()" x-cloak>
       <div class="card" x-show="!$store.identity.activeHash">

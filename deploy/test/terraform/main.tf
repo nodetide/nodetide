@@ -26,7 +26,7 @@ module "placement" {
 
 locals {
   labels = merge({ project = "nodetide", stack = "test", managed-by = "terraform" }, var.labels)
-  hosts  = var.domain == "" ? [] : ["nt-node", "nt-rp", "nt-wallet", "nt-grafana", "nt-verifier"]
+  hosts  = var.domain == "" ? [] : ["nt-node", "nt-rp", "nt-grafana", "nt-verifier"]   # no public wallet: the web client at nt-node is the wallet
   # the zone: created here (create_dns_zone) or an existing one
   zone_name = var.dns_zone == "" ? "" : (var.create_dns_zone ? hcloud_zone.managed[0].name : data.hcloud_zone.this[0].name)
 }
