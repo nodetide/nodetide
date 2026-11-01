@@ -10,6 +10,12 @@ from nodetide.core.claims import ClaimDocument
 from nodetide.core.explorer_index import summarize_event
 from nodetide.core.identity import DeviceCapability, Identity, SetClaimOrderEvent, Sigchain
 
+
+def order_event(identity, signer, claim_type, order):
+    """A set_claim_order built by hand (a content event), to try invalid ones."""
+    chain = identity.sigchain
+    return SetClaimOrderEvent.create(signer, chain.content_head, claim_type, order, seq=len(chain.content), control_ref=chain.head_hash)
+
 D = DeviceCapability
 
 
@@ -77,7 +83,7 @@ def test_the_event_survives_serialisation_and_tampering_is_detected():
 def test_invalid_orders_are_rejected(make):
     identity, ids, phone = holder_with("a@example.com", "b@example.com", phone="+359881234567")
     claim_type, order = make(ids, phone)
-    event = SetClaimOrderEvent.create(identity.local_keypair, identity.sigchain.head_hash, claim_type, order)
+    event = order_event(identity, identity.local_keypair, claim_type, order)
     identity.sigchain.append(event)
     assert not identity.verify()[0]
 
@@ -85,7 +91,7 @@ def test_invalid_orders_are_rejected(make):
 def test_a_revoked_claim_cannot_be_ordered():
     identity, (a, b), _ = holder_with("a@example.com", "b@example.com")
     identity.revoke_claim(a)
-    identity.sigchain.append(SetClaimOrderEvent.create(identity.local_keypair, identity.sigchain.head_hash, "email", [a, b]))
+    identity.sigchain.append(order_event(identity, identity.local_keypair, "email", [a, b]))
     assert not identity.verify()[0]
 
 
@@ -93,9 +99,9 @@ def test_only_the_master_or_a_claims_device_may_order_claims():
     identity, (a, b), _ = holder_with("a@example.com", "b@example.com")
     plain, _ = identity.add_device("laptop", capabilities=[D.AUTHENTICATE])
     manager, _ = identity.add_device("phone", capabilities=[D.MANAGE_CLAIMS])
-    identity.sigchain.append(SetClaimOrderEvent.create(plain.signing_key, identity.sigchain.head_hash, "email", [b, a]))
+    identity.sigchain.append(order_event(identity, plain.signing_key, "email", [b, a]))
     assert not identity.verify()[0]
-    identity.sigchain.events.pop()
+    identity.sigchain.content.pop()
     identity.set_claim_order("email", [b, a], signer=manager.signing_key)
     assert identity.verify()[0] and identity.sigchain.claim_order("email") == [b, a]
 

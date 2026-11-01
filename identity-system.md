@@ -23,6 +23,8 @@ Master Key (identity)
                                    └── ...
 ```
 
+> **v2:** the sigchain is now two tracks, a small control chain that commits to bulk content, so a verifier can skip the content. See `sigchain-v2.md`.
+
 ## Sigchain Structure
 
 The sigchain is an append-only log of signed events:

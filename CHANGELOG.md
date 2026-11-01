@@ -3,6 +3,33 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-01 (sigchain v2) - a control chain that commits to its content; light verification
+
+Clean slate: v1 chains are not read (the test server's data is dropped). Spec: `sigchain-v2.md`.
+
+### Changed
+- **Two tracks per identity** (`core/identity.py`): the *control* chain (genesis, devices, rotation, recovery, owners, `revoke_claim`, new `checkpoint`; linked by
+  `prev`) and the *content* track (`add_claim`, `set_claim_order`; `seq`, `prev` = previous content event, `control_ref` = the control event signed under).
+  `Sigchain.events` is the control chain (so identity hash, head and device checks are as before); `Sigchain.content` the claims. The identity hash is still the hash
+  of the genesis.
+- **Commitments**: a control event carries `content: {count, root}` (Merkle root, `core/merkle.py`, RFC 6962 style) over the first `count` content events; every
+  control event created while content exists commits all of it. A content event is valid only if its signer was authorized as of `control_ref` and the *next*
+  control event commits it, so a revoked key cannot back-date claims.
+- **Light verification**: a chain without content (`to_list(light=True)`) verifies as `is_partial`; `attach_content(event, proof)` accepts one content event with its Merkle
+  path (`content_proof(seq)`); revocations are control events so a light client sees them all. A half-uploaded chain still has every present event checked.
+- **Behind, not wrong**: an object naming a control event the verifier lacks is reported as behind (`unknown_chain_head` for attestations, `behind:` for content, HTTP
+  409 `stale_state` with `behind: true` on the node) before anything else; the fetcher already goes to other sources for it.
+- Node API: events go to their track (`prev` is checked against that track's head); `GET /identities/{h}/sigchain?light=1`, `GET /identities/{h}/content/{seq}` (event +
+  proof); responses carry `content_length`, `commitment`. The explorer shows both tracks (an event page says which). The OIDC bridge accepts a light chain plus
+  `claim_event`/`claim_proof` per presentation. `choose_sigchain` merges a newer light copy with the stored content.
+- Web client: claims are content events; control events it signs carry the commitment; it publishes a `checkpoint` before a claim is attested; sign-in sends the
+  control chain and one Merkle path per shown claim (full chain if a claim is not committed yet).
+- Test wallet app (`deploy/test/wallet`) publishes control then content events by track.
+
+### Not done
+- Go (`golang/auth`) and Android still speak v1; they agree with v2 only for identities without claims.
+- Verifiers (email/phone/eID) still take the full chain; the light path is used at sign-in. Freshness (proving there is nothing newer than a shown head) is open.
+
 ## 2026-11-01 (browser wallet) - claims and verification in the browser, no server-side keys
 
 ### Added

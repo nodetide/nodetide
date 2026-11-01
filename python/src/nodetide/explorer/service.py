@@ -168,11 +168,11 @@ class Explorer:
             "identity_type": genesis.identity_type.value,
             "ephemeral": genesis.ephemeral,
             "created_at": genesis.timestamp,
-            "last_event_at": chain.events[-1].timestamp,
+            "last_event_at": max(e.timestamp for e in chain.all_events()),
             "verified": valid,
             "verify_error": error,
             "head_hash": chain.head_hash,
-            "event_count": len(chain.events),
+            "event_count": len(chain.all_events()),
             "master_pubkey": chain.get_current_master_key(),
             "encryption_pubkey": genesis.encryption_pubkey,
             "master_history": master_history,
@@ -201,7 +201,7 @@ class Explorer:
                     "signed_by": event.signed_by,
                     "summary": summarize_event(event),
                 }
-                for index, event in enumerate(chain.events)
+                for index, event in enumerate(chain.all_events())
             ],
             "counts": {
                 "public_messages": self._count(
@@ -353,22 +353,27 @@ class Explorer:
         if row is None:
             return None
         chain = self.storage.get_sigchain(row["identity_hash"])
-        if chain is None or row["idx"] >= len(chain.events):
+        events = chain.all_events() if chain is not None else []
+        if chain is None or row["idx"] >= len(events):
             return None
         index = row["idx"]
-        event = chain.events[index]
+        event = events[index]
+        in_content = index >= len(chain.events)
+        track = chain.content if in_content else chain.events
+        position = index - len(chain.events) if in_content else index
         return {
             "event_hash": event_hash,
             "identity_hash": row["identity_hash"],
             "identity_name": self._name_of(row["identity_hash"]),
             "index": index,
-            "chain_length": len(chain.events),
+            "chain_length": len(events),
+            "track": "content" if in_content else "control",
             "type": event.type.value,
             "timestamp": event.timestamp,
             "signed_by": event.signed_by,
             "summary": summarize_event(event),
-            "prev_hash": chain.events[index - 1].event_hash() if index > 0 else None,
-            "next_hash": chain.events[index + 1].event_hash() if index + 1 < len(chain.events) else None,
+            "prev_hash": track[position - 1].event_hash() if position > 0 else None,
+            "next_hash": track[position + 1].event_hash() if position + 1 < len(track) else None,
             "raw": event.to_dict(),
         }
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from nodetide.core.merkle import EMPTY_ROOT, merkle_proof, merkle_root, verify_proof
 from nodetide.core.crypto import (
     KeyPair,
     VerifyKey,
@@ -39,6 +40,7 @@ class EventType(str, Enum):
     REVOKE_CLAIM = "revoke_claim"
     SET_CLAIM_ORDER = "set_claim_order"
     SET_OWNERS = "set_owners"
+    CHECKPOINT = "checkpoint"
 
 
 class IdentityType(str, Enum):
@@ -75,6 +77,11 @@ class SigchainEvent:
     # Owner approvals (organization identities): see "Organization identities" below. Part of the event hash, not of
     # what anyone signs, so approvals can be collected one after another.
     approvals: list[dict[str, str]] | None = None
+    # Control events: a commitment to the first `count` content events, {"count": n, "root": merkle root} (sigchain-v2.md)
+    content: dict[str, Any] | None = None
+    # Content events: position in the content track and the control event they were signed under
+    seq: int | None = None
+    control_ref: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -90,6 +97,11 @@ class SigchainEvent:
         }
         if self.approvals is not None:  # absent for ordinary events, so existing hashes do not change
             d["approvals"] = self.approvals
+        if self.content is not None:
+            d["content"] = self.content
+        if self.seq is not None:
+            d["seq"] = self.seq
+            d["control_ref"] = self.control_ref
         return d
 
     def signable_dict(self) -> dict[str, Any]:
@@ -121,6 +133,7 @@ class SigchainEvent:
             EventType.REVOKE_CLAIM: RevokeClaimEvent,
             EventType.SET_CLAIM_ORDER: SetClaimOrderEvent,
             EventType.SET_OWNERS: SetOwnersEvent,
+            EventType.CHECKPOINT: CheckpointEvent,
         }
 
         event_class = event_classes.get(event_type)
@@ -130,6 +143,11 @@ class SigchainEvent:
         event = event_class._from_dict(data)
         if data.get("approvals") is not None:
             event.approvals = [dict(a) for a in data["approvals"]]
+        if data.get("content") is not None:
+            event.content = dict(data["content"])
+        if data.get("seq") is not None:
+            event.seq = data["seq"]
+            event.control_ref = data.get("control_ref")
         return event
 
 
@@ -276,6 +294,7 @@ class AddDeviceEvent(SigchainEvent):
         prev_hash: str,
         capabilities: list[DeviceCapability] | None = None,
         expires: int | None = None,
+        content: dict | None = None,
     ) -> AddDeviceEvent:
         """Create and sign an add device event."""
         return cls.create_for(
@@ -286,6 +305,7 @@ class AddDeviceEvent(SigchainEvent):
             prev_hash,
             capabilities,
             expires,
+            content,
         )
 
     @classmethod
@@ -298,10 +318,12 @@ class AddDeviceEvent(SigchainEvent):
         prev_hash: str,
         capabilities: list[DeviceCapability] | None = None,
         expires: int | None = None,
+        content: dict | None = None,
     ) -> AddDeviceEvent:
         """Create and sign an add device event for a device whose public keys we were given (it keeps its private keys)."""
         caps = [c.value for c in capabilities] if capabilities else [c.value for c in DeviceCapability]
         event = cls(
+            content=content,
             type=EventType.ADD_DEVICE,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -358,9 +380,11 @@ class RevokeDeviceEvent(SigchainEvent):
         device_pubkey: str,
         prev_hash: str,
         reason: str | None = None,
+        content: dict | None = None,
     ) -> RevokeDeviceEvent:
         """Create and sign a revoke device event."""
         event = cls(
+            content=content,
             type=EventType.REVOKE_DEVICE,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -413,9 +437,11 @@ class RotateMasterEvent(SigchainEvent):
         old_keypair: KeyPair,
         new_keypair: KeyPair,
         prev_hash: str,
+        content: dict | None = None,
     ) -> RotateMasterEvent:
         """Create and sign a master key rotation event."""
         event = cls(
+            content=content,
             type=EventType.ROTATE_MASTER,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -481,9 +507,11 @@ class SetRecoveryEvent(SigchainEvent):
         backup_trustees: list[str] | None = None,
         backup_threshold: int | None = None,
         backup_activates_after: int | None = None,
+        content: dict | None = None,
     ) -> SetRecoveryEvent:
         """Create and sign a set recovery event."""
         event = cls(
+            content=content,
             type=EventType.SET_RECOVERY,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -614,9 +642,11 @@ class ResolveForkEvent(SigchainEvent):
         prev_hash: str,
         chosen_branch_hash: str,
         rejected_branch_hash: str,
+        content: dict | None = None,
     ) -> ResolveForkEvent:
         """Create and sign a fork resolution event."""
         event = cls(
+            content=content,
             type=EventType.RESOLVE_FORK,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -666,9 +696,11 @@ class SetDistributionEvent(SigchainEvent):
         master_keypair: KeyPair,
         prev_hash: str,
         distribution_points: list[str],
+        content: dict | None = None,
     ) -> SetDistributionEvent:
         """Create and sign a set distribution event."""
         event = cls(
+            content=content,
             type=EventType.SET_DISTRIBUTION,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -729,12 +761,21 @@ class AddClaimEvent(SigchainEvent):
         claim_type: str,
         commitment: str,
         expires: int | None = None,
+        *,
+        seq: int = 0,
+        control_ref: str | None = None,
     ) -> AddClaimEvent:
-        """Create and sign an add-claim event (signer: master or manage_claims device)."""
+        """Create and sign an add-claim event (signer: master or manage_claims device).
+
+        A content event: `prev_hash` is the previous CONTENT event (None for the first), `seq` its position and
+        `control_ref` the latest control event (the chain head) it is signed under.
+        """
         event = cls(
             type=EventType.ADD_CLAIM,
             timestamp=int(time.time()),
             prev=prev_hash,
+            seq=seq,
+            control_ref=control_ref,
             signature="",
             signed_by=signer.verify_key.to_hex(),
             claim_id=claim_id,
@@ -784,12 +825,17 @@ class SetClaimOrderEvent(SigchainEvent):
         )
 
     @classmethod
-    def create(cls, signer: KeyPair | SigningKey, prev_hash: str, claim_type: str, order: list[str]) -> SetClaimOrderEvent:
-        """Create and sign an order event (signer: master or manage_claims device)."""
+    def create(
+        cls, signer: KeyPair | SigningKey, prev_hash: str | None, claim_type: str, order: list[str],
+        *, seq: int = 0, control_ref: str | None = None,
+    ) -> SetClaimOrderEvent:
+        """Create and sign an order event (signer: master or manage_claims device). A content event, see AddClaimEvent."""
         event = cls(
             type=EventType.SET_CLAIM_ORDER,
             timestamp=int(time.time()),
             prev=prev_hash,
+            seq=seq,
+            control_ref=control_ref,
             signature="",
             signed_by=signer.verify_key.to_hex(),
             claim_type=claim_type,
@@ -837,9 +883,11 @@ class RevokeClaimEvent(SigchainEvent):
         prev_hash: str,
         claim_id: str,
         reason: str | None = None,
+        content: dict | None = None,
     ) -> RevokeClaimEvent:
         """Create and sign a revoke-claim event."""
         event = cls(
+            content=content,
             type=EventType.REVOKE_CLAIM,
             timestamp=int(time.time()),
             prev=prev_hash,
@@ -851,6 +899,48 @@ class RevokeClaimEvent(SigchainEvent):
         signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
         event.signature = signer.sign_hex(signable.encode("utf-8"))
         return event
+
+
+@dataclass(kw_only=True)
+class CheckpointEvent(SigchainEvent):
+    """Commit to the content events so far (the `content` field), changing nothing else.
+
+    Signed by the master key or a device with manage_claims. Needed when content was added and no other control
+    event has committed it yet: a light verifier can only rely on content that a control event commits to.
+    """
+
+    def __post_init__(self):
+        self.type = EventType.CHECKPOINT
+
+    @classmethod
+    def _from_dict(cls, data: dict[str, Any]) -> CheckpointEvent:
+        return cls(
+            type=EventType.CHECKPOINT,
+            timestamp=data["timestamp"],
+            prev=data["prev"],
+            signature=data["signature"],
+            signed_by=data["signed_by"],
+            version=data.get("version", 1),
+            alg=data.get("alg", DEFAULT_SIGN_ALG),
+            hash_alg=data.get("hash_alg", DEFAULT_HASH_ALG),
+        )
+
+    @classmethod
+    def create(cls, signer: KeyPair | SigningKey, prev_hash: str, content: dict[str, Any]) -> CheckpointEvent:
+        event = cls(
+            type=EventType.CHECKPOINT,
+            timestamp=int(time.time()),
+            prev=prev_hash,
+            signature="",
+            signed_by=signer.verify_key.to_hex(),
+            content=content,
+        )
+        signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
+        event.signature = signer.sign_hex(signable.encode("utf-8"))
+        return event
+
+
+CONTENT_TYPES = (EventType.ADD_CLAIM, EventType.SET_CLAIM_ORDER)
 
 
 @dataclass
@@ -1152,7 +1242,10 @@ def check_recovery_config(event: SetRecoveryEvent, identity: str, resolve: Chain
 class Sigchain:
     """Append-only chain of signed events for an identity."""
 
-    events: list[SigchainEvent] = field(default_factory=list)
+    events: list[SigchainEvent] = field(default_factory=list)  # the CONTROL chain (linked by prev, genesis first)
+    content: list[SigchainEvent] = field(default_factory=list)  # the CONTENT track (add_claim, set_claim_order), by seq
+    # Content events a light client was given with a Merkle proof (seq -> event); see attach_content
+    sparse: dict[int, SigchainEvent] = field(default_factory=dict)
 
     @property
     def genesis(self) -> GenesisEvent | None:
@@ -1177,12 +1270,44 @@ class Sigchain:
         return None
 
     def append(self, event: SigchainEvent) -> None:
-        """Append an event to the chain."""
-        self.events.append(event)
+        """Append an event to its track: content events to the content track, everything else to the control chain."""
+        if event.type in CONTENT_TYPES:
+            self.content.append(event)
+        else:
+            self.events.append(event)
 
-    def to_list(self) -> list[dict[str, Any]]:
-        """Convert to list of dicts for serialization."""
-        return [e.to_dict() for e in self.events]
+    @property
+    def content_head(self) -> str | None:
+        return self.content[-1].event_hash() if self.content else None
+
+    def content_commitment(self) -> dict[str, Any] | None:
+        """What a control event signed now must carry: {count, root} over all content events (None when there are none)."""
+        if not self.content:
+            return None
+        return {"count": len(self.content), "root": merkle_root([e.event_hash() for e in self.content])}
+
+    @property
+    def is_partial(self) -> bool:
+        """True when the control chain commits to content events this object does not hold (a light chain)."""
+        return len(self.content) < self.committed_count()
+
+    def committed_count(self) -> int:
+        count = 0
+        for event in self.events:
+            if event.content is not None and isinstance(event.content.get("count"), int):
+                count = max(count, event.content["count"])
+        return count
+
+    def all_events(self) -> list[SigchainEvent]:
+        """Every event this object holds: the control chain, then the content track (the explorer's event order)."""
+        return list(self.events) + list(self.content)
+
+    def to_list(self, light: bool = False) -> list[dict[str, Any]]:
+        """Serialize: the control chain, then the content track (omitted when `light`)."""
+        out = [e.to_dict() for e in self.events]
+        if not light:
+            out += [e.to_dict() for e in self.content]
+        return out
 
     def to_json(self) -> str:
         """Convert to JSON string."""
@@ -1192,7 +1317,10 @@ class Sigchain:
     def from_list(cls, data: list[dict[str, Any]]) -> Sigchain:
         """Load from list of dicts."""
         events = [SigchainEvent.from_dict(e) for e in data]
-        return cls(events=events)
+        chain = cls()
+        for event in events:
+            chain.append(event)
+        return chain
 
     @classmethod
     def from_json(cls, json_str: str) -> Sigchain:
@@ -1259,10 +1387,19 @@ class Sigchain:
 
         return active
 
+    def _content_events(self) -> list[SigchainEvent]:
+        """The content events this object can speak about: all of them, or only those a light client was proven."""
+        if self.content:
+            return list(self.content)
+        return [self.sparse[i] for i in sorted(self.sparse)]
+
     def get_claims(self) -> list[ClaimRecord]:
-        """All claims ever made on this chain, in order, with revocation applied."""
+        """All claims made on this identity, in order, with revocation applied.
+
+        A light chain knows only the claims it was given proofs for; revocations are control events, so it always sees them.
+        """
         records: dict[str, ClaimRecord] = {}
-        for event in self.events:
+        for event in self._content_events():
             if isinstance(event, AddClaimEvent):
                 records[event.claim_id] = ClaimRecord(
                     claim_id=event.claim_id,
@@ -1273,10 +1410,14 @@ class Sigchain:
                     event_hash=event.event_hash(),
                     signed_by=event.signed_by,
                 )
-            elif isinstance(event, RevokeClaimEvent) and event.claim_id in records:
+        for event in self.events:
+            if isinstance(event, RevokeClaimEvent) and event.claim_id in records:
                 records[event.claim_id].revoked_at = event.timestamp
                 records[event.claim_id].revoke_reason = event.reason
         return list(records.values())
+
+    def revoked_claim_ids(self) -> set[str]:
+        return {e.claim_id for e in self.events if isinstance(e, RevokeClaimEvent)}
 
     def get_claim(self, claim_id: str) -> ClaimRecord | None:
         return next((c for c in self.get_claims() if c.claim_id == claim_id), None)
@@ -1289,7 +1430,7 @@ class Sigchain:
         """
         active = [c.claim_id for c in self.get_claims() if c.claim_type == claim_type and c.status(at_time) == "active"]
         listed: list[str] = []
-        for event in self.events:
+        for event in self._content_events():
             if isinstance(event, SetClaimOrderEvent) and event.claim_type == claim_type:
                 listed = list(event.order)
         first = [c for c in listed if c in active]
@@ -1375,8 +1516,7 @@ class Sigchain:
         # Device keys authorized so far: pubkey -> (capabilities, expires); and revoked keys
         devices: dict[str, tuple[list[str], int | None]] = {}
         revoked: set[str] = set()
-        claim_states: dict[str, bool] = {}  # claim_id -> revoked?
-        claim_types: dict[str, str] = {}    # claim_id -> claim type
+        revoked_claims: set[str] = set()
         recovery_config: SetRecoveryEvent | None = None
 
         # Verify each subsequent event
@@ -1422,6 +1562,9 @@ class Sigchain:
             if isinstance(event, SetOwnersEvent):
                 return False, f"Event {i}: only an organization has owners"
 
+            if event.type in CONTENT_TYPES or event.seq is not None:
+                return False, f"Event {i}: a content event does not belong in the control chain"
+
             # Get signer key
             signer_key = VerifyKey.from_hex(event.signed_by)
 
@@ -1444,7 +1587,7 @@ class Sigchain:
                     if err:
                         return False, f"Event {i}: {err}"
                     recovery_config = event
-            elif isinstance(event, (AddClaimEvent, RevokeClaimEvent, SetClaimOrderEvent)):
+            elif isinstance(event, (RevokeClaimEvent, CheckpointEvent)):
                 # Master, or a currently valid device with manage_claims
                 if event.signed_by != current_master:
                     caps, expires = devices.get(event.signed_by, ([], None))
@@ -1456,30 +1599,10 @@ class Sigchain:
                     )
                     if not allowed:
                         return False, f"Event {i}: signer may not manage claims"
-                if isinstance(event, AddClaimEvent):
-                    if event.claim_id in claim_states:
-                        return False, f"Event {i}: duplicate claim_id"
-                    claim_states[event.claim_id] = False
-                    claim_types[event.claim_id] = event.claim_type
-                elif isinstance(event, SetClaimOrderEvent):
-                    order = event.order
-                    if not isinstance(order, list) or not 1 <= len(order) <= SetClaimOrderEvent.MAX_ORDER:
-                        return False, f"Event {i}: a claim order lists between 1 and {SetClaimOrderEvent.MAX_ORDER} claims"
-                    if len(set(order)) != len(order) or not all(isinstance(c, str) for c in order):
-                        return False, f"Event {i}: a claim is listed twice"
-                    for claim_id in order:
-                        if claim_id not in claim_states:
-                            return False, f"Event {i}: orders an unknown claim"
-                        if claim_states[claim_id]:
-                            return False, f"Event {i}: orders a revoked claim"
-                        if claim_types[claim_id] != event.claim_type:
-                            return False, f"Event {i}: orders a claim of another type"
-                else:
-                    if event.claim_id not in claim_states:
-                        return False, f"Event {i}: revokes an unknown claim"
-                    if claim_states[event.claim_id]:
+                if isinstance(event, RevokeClaimEvent):
+                    if event.claim_id in revoked_claims:
                         return False, f"Event {i}: claim already revoked"
-                    claim_states[event.claim_id] = True
+                    revoked_claims.add(event.claim_id)
             elif isinstance(event, RotateMasterEvent):
                 # Must be signed by old master
                 if event.signed_by != current_master:
@@ -1495,7 +1618,191 @@ class Sigchain:
 
             prev_hash = event.event_hash()
 
+        return self._verify_content()
+
+    # --- the two tracks -----------------------------------------------------------------------------------------
+
+    def commitments(self) -> list[tuple[int, str]]:
+        """(count, root) in force after each control event: an event without `content` commits what its predecessor did."""
+        out: list[tuple[int, str]] = []
+        prev = (0, EMPTY_ROOT)
+        for event in self.events:
+            c = event.content
+            if isinstance(c, dict) and isinstance(c.get("count"), int) and isinstance(c.get("root"), str):
+                prev = (c["count"], c["root"])
+            out.append(prev)
+        return out
+
+    def authority_states(self) -> list[tuple[str, dict[str, tuple[list[str], int | None]], set[str]]]:
+        """(master key, devices, revoked devices) as of each control event, replayed from the chain."""
+        master = self.events[0].pubkey if self.events and isinstance(self.events[0], GenesisEvent) else None
+        devices: dict[str, tuple[list[str], int | None]] = {}
+        revoked: set[str] = set()
+        states = []
+        for event in self.events:
+            if isinstance(event, AddDeviceEvent):
+                devices[event.device_pubkey] = (list(event.capabilities or []), event.expires)
+            elif isinstance(event, RevokeDeviceEvent):
+                revoked.add(event.device_pubkey)
+            elif isinstance(event, (RotateMasterEvent, SocialRecoveryEvent)):
+                master = event.new_pubkey
+            states.append((master, dict(devices), set(revoked)))
+        return states
+
+    @staticmethod
+    def _may_manage_claims(state, signer: str, at: int) -> bool:
+        master, devices, revoked = state
+        if signer == master:
+            return True
+        caps, expires = devices.get(signer, ([], None))
+        return (
+            signer in devices and signer not in revoked
+            and DeviceCapability.MANAGE_CLAIMS.value in caps
+            and not (expires and expires < at)
+        )
+
+    def _verify_content(self) -> tuple[bool, str | None]:
+        """Commitments of the control chain, and (when this object holds the content) every content event."""
+        counts = []
+        prev_count = 0
+        for i, event in enumerate(self.events):
+            c = event.content
+            if c is not None:
+                if i == 0:
+                    return False, "Genesis cannot commit to content"
+                if not isinstance(c, dict) or set(c) != {"count", "root"} or isinstance(c["count"], bool) \
+                        or not isinstance(c["count"], int) or not isinstance(c["root"], str):
+                    return False, f"Event {i}: malformed content commitment"
+                if c["count"] < prev_count:
+                    return False, f"Event {i}: content commitment goes backwards"
+                prev_count = c["count"]
+            counts.append(prev_count)
+        commitments = self.commitments()
+        hashes = [e.event_hash() for e in self.content]
+        for i, event in enumerate(self.events):
+            count, root = commitments[i]
+            if count <= len(hashes) and merkle_root(hashes[:count]) != root:
+                return False, f"Event {i}: content commitment does not match the content"
+
+        partial = len(self.content) < counts[-1]
+        if partial and not self.content:
+            return True, None  # light: the control chain checks out; the content it commits to is not here to check
+
+        index_of = {e.event_hash(): k for k, e in enumerate(self.events)}
+        states = self.authority_states()
+        last = len(self.events) - 1
+        committed_by_ref = [0] * len(self.events)  # content events signed under control event k
+        prev_hash: str | None = None
+        prev_k = 0
+        claims: dict[str, tuple[int, str]] = {}  # claim_id -> (seq, type)
+        for i, event in enumerate(self.content):
+            tag = f"Content event {i}"
+            if event.type not in CONTENT_TYPES or event.seq is None:
+                return False, f"{tag}: not a content event"
+            if event.seq != i or event.prev != prev_hash:
+                return False, f"{tag}: seq or prev does not continue the content track"
+            k = index_of.get(event.control_ref)
+            if k is None:
+                return False, f"{tag}: behind: it names a control event this chain does not have"
+            if k < prev_k:
+                return False, f"{tag}: control_ref goes backwards"
+            if i < commitments[k][0]:
+                return False, f"{tag}: already committed before the control event it names"
+            if k < last and i >= commitments[k + 1][0]:
+                return False, f"{tag}: not committed by the control event that follows its control_ref"
+            if not self._may_manage_claims(states[k], event.signed_by, event.timestamp):
+                return False, f"{tag}: signer may not manage claims"
+            signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
+            if not VerifyKey.from_hex(event.signed_by).verify_hex(signable.encode("utf-8"), event.signature):
+                return False, f"{tag}: signature invalid"
+            committed_by_ref[k] += 1
+            if isinstance(event, AddClaimEvent):
+                if event.claim_id in claims:
+                    return False, f"{tag}: duplicate claim_id"
+                claims[event.claim_id] = (i, event.claim_type)
+            elif isinstance(event, SetClaimOrderEvent):
+                order = event.order
+                if not isinstance(order, list) or not 1 <= len(order) <= SetClaimOrderEvent.MAX_ORDER:
+                    return False, f"{tag}: a claim order lists between 1 and {SetClaimOrderEvent.MAX_ORDER} claims"
+                if len(set(order)) != len(order) or not all(isinstance(c, str) for c in order):
+                    return False, f"{tag}: a claim is listed twice"
+                revoked_by_k = {
+                    e.claim_id for j, e in enumerate(self.events) if j <= k and isinstance(e, RevokeClaimEvent)
+                }
+                for claim_id in order:
+                    if claim_id not in claims:
+                        return False, f"{tag}: orders an unknown claim"
+                    if claim_id in revoked_by_k:
+                        return False, f"{tag}: orders a revoked claim"
+                    if claims[claim_id][1] != event.claim_type:
+                        return False, f"{tag}: orders a claim of another type"
+            prev_hash = event.event_hash()
+            prev_k = k
+
+        if partial:
+            return True, None  # a chain still being filled: what is here has been checked, the rest is yet to arrive
+
+        # each control event commits exactly the content signed under the control events up to and including its predecessor
+        running = 0
+        for k in range(len(self.events)):
+            if k > 0 and commitments[k][0] != running and self.events[k].content is not None:
+                return False, f"Event {k}: commits {commitments[k][0]} content events, {running} exist before it"
+            if k > 0 and self.events[k].content is None and running != commitments[k][0]:
+                return False, f"Event {k}: content exists that this control event does not commit to"
+            running += committed_by_ref[k]
+
+        # a revoked claim must exist, and have been committed no later than the revocation
+        for j, event in enumerate(self.events):
+            if isinstance(event, RevokeClaimEvent):
+                known = claims.get(event.claim_id)
+                if known is None:
+                    return False, f"Event {j}: revokes an unknown claim"
+                if known[0] >= commitments[j][0]:
+                    return False, f"Event {j}: revokes a claim its commitment does not cover"
         return True, None
+
+    def attach_content(self, event: SigchainEvent, proof: list[str]) -> str | None:
+        """Accept one content event on a light chain, given its Merkle path. Returns why not, or None.
+
+        "behind: ..." means the chain lacks the control event the content names: fetch more control events first.
+        """
+        if event.type not in CONTENT_TYPES or event.seq is None:
+            return "not a content event"
+        index_of = {e.event_hash(): k for k, e in enumerate(self.events)}
+        k = index_of.get(event.control_ref)
+        if k is None:
+            return "behind: the content event names a control event this chain does not have"
+        if k + 1 >= len(self.events):
+            return "not committed yet: no control event after the one it names"
+        commitments = self.commitments()
+        count_before, (count, root) = commitments[k][0], commitments[k + 1]
+        if not count_before <= event.seq < count:
+            return "the content event is not in the interval the control chain commits"
+        if not verify_proof(event.event_hash(), event.seq, count, proof, root):
+            return "the Merkle proof does not match the control chain's commitment"
+        if not self._may_manage_claims(self.authority_states()[k], event.signed_by, event.timestamp):
+            return "signer may not manage claims"
+        signable = json.dumps(event.signable_dict(), sort_keys=True, separators=(",", ":"))
+        if not VerifyKey.from_hex(event.signed_by).verify_hex(signable.encode("utf-8"), event.signature):
+            return "signature invalid"
+        self.sparse[event.seq] = event
+        return None
+
+    def content_proof(self, seq: int) -> dict[str, Any]:
+        """What to send a light client for content event `seq`: the event and its path to the committing control event."""
+        if not 0 <= seq < len(self.content):
+            raise IndexError("no such content event")
+        event = self.content[seq]
+        index_of = {e.event_hash(): k for k, e in enumerate(self.events)}
+        k = index_of[event.control_ref]
+        if k + 1 >= len(self.events):
+            raise ValueError("not committed yet")
+        count = self.commitments()[k + 1][0]
+        return {
+            "event": event.to_dict(),
+            "proof": merkle_proof([e.event_hash() for e in self.content[:count]], seq),
+            "committed_by": self.events[k + 1].event_hash(),
+        }
 
 
 @dataclass
@@ -1553,6 +1860,7 @@ class Identity:
             prev_hash=self.sigchain.head_hash,
             capabilities=capabilities,
             expires=expires,
+            content=self.sigchain.content_commitment(),
         )
         self.sigchain.append(event)
         return device_keypair, event
@@ -1570,7 +1878,7 @@ class Identity:
             raise ValueError("Cannot add device: no local keypair")
         event = AddDeviceEvent.create_for(
             self.local_keypair, device_pubkey, device_encryption_pubkey, label, self.sigchain.head_hash,
-            capabilities, expires,
+            capabilities, expires, self.sigchain.content_commitment(),
         )
         self.sigchain.append(event)
         return event
@@ -1585,6 +1893,7 @@ class Identity:
             device_pubkey=device_pubkey,
             prev_hash=self.sigchain.head_hash,
             reason=reason,
+            content=self.sigchain.content_commitment(),
         )
         self.sigchain.append(event)
         return event
@@ -1599,6 +1908,7 @@ class Identity:
             old_keypair=self.local_keypair,
             new_keypair=new_keypair,
             prev_hash=self.sigchain.head_hash,
+            content=self.sigchain.content_commitment(),
         )
         self.sigchain.append(event)
         self.local_keypair = new_keypair
@@ -1624,6 +1934,7 @@ class Identity:
             backup_trustees=backup_trustees,
             backup_threshold=backup_threshold,
             backup_activates_after=backup_activates_after,
+            content=self.sigchain.content_commitment(),
         )
         self.sigchain.append(event)
         return event
@@ -1637,6 +1948,7 @@ class Identity:
             master_keypair=self.local_keypair,
             prev_hash=self.sigchain.head_hash,
             distribution_points=distribution_points,
+            content=self.sigchain.content_commitment(),
         )
         self.sigchain.append(event)
         return event
@@ -1654,7 +1966,8 @@ class Identity:
         if signer is None:
             raise ValueError("Cannot add claim: no signing key")
         event = AddClaimEvent.create(
-            signer, self.sigchain.head_hash, claim_id, claim_type, commitment, expires
+            signer, self.sigchain.content_head, claim_id, claim_type, commitment, expires,
+            seq=len(self.sigchain.content), control_ref=self.sigchain.head_hash,
         )
         self.sigchain.append(event)
         return event
@@ -1669,7 +1982,10 @@ class Identity:
         signer = signer or self.local_keypair
         if signer is None:
             raise ValueError("Cannot order claims: no signing key")
-        event = SetClaimOrderEvent.create(signer, self.sigchain.head_hash, claim_type, order)
+        event = SetClaimOrderEvent.create(
+            signer, self.sigchain.content_head, claim_type, order,
+            seq=len(self.sigchain.content), control_ref=self.sigchain.head_hash,
+        )
         self.sigchain.append(event)
         return event
 
@@ -1683,7 +1999,21 @@ class Identity:
         signer = signer or self.local_keypair
         if signer is None:
             raise ValueError("Cannot revoke claim: no signing key")
-        event = RevokeClaimEvent.create(signer, self.sigchain.head_hash, claim_id, reason)
+        event = RevokeClaimEvent.create(
+            signer, self.sigchain.head_hash, claim_id, reason, content=self.sigchain.content_commitment()
+        )
+        self.sigchain.append(event)
+        return event
+
+    def checkpoint(self, signer: KeyPair | SigningKey | None = None) -> CheckpointEvent:
+        """Commit to the content events so far, so a light verifier can rely on them (see sigchain-v2.md)."""
+        signer = signer or self.local_keypair
+        if signer is None:
+            raise ValueError("Cannot checkpoint: no signing key")
+        commitment = self.sigchain.content_commitment()
+        if commitment is None:
+            raise ValueError("Nothing to commit: there are no content events")
+        event = CheckpointEvent.create(signer, self.sigchain.head_hash, commitment)
         self.sigchain.append(event)
         return event
 

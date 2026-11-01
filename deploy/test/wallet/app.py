@@ -216,17 +216,26 @@ async def call(base: str, method: str, path: str, **kw: Any) -> tuple[int, Any]:
 
 
 async def publish() -> int:
-    """Send the identity's events the node does not have yet."""
+    """Send the identity's events the node does not have yet: the control chain, then the content track."""
     identity = wallet.identity
-    events = identity.sigchain.to_list()
-    status, body = await node("GET", f"/api/identities/{identity.identity_hash}/sigchain")
-    known = body.get("length", 0) if status == 200 else 0
-    for index in range(known, len(events)):
+    control = identity.sigchain.to_list(light=True)
+    content = [e.to_dict() for e in identity.sigchain.content]
+    status, body = await node("GET", f"/api/identities/{identity.identity_hash}/sigchain?light=1")
+    known_control = body.get("length", 0) if status == 200 else 0
+    known_content = body.get("content_length", 0) if status == 200 else 0
+    sent = 0
+    for index in range(known_control, len(control)):
         path = "/api/identities" if index == 0 else f"/api/identities/{identity.identity_hash}/events"
-        status, body = await node("POST", path, json={"event": events[index]})
+        status, body = await node("POST", path, json={"event": control[index]})
         if status not in (200, 201):
-            raise WalletError(f"the node refused event {index}: {body}", 502)
-    return len(events) - known
+            raise WalletError(f"the node refused control event {index}: {body}", 502)
+        sent += 1
+    for index in range(known_content, len(content)):
+        status, body = await node("POST", f"/api/identities/{identity.identity_hash}/events", json={"event": content[index]})
+        if status not in (200, 201):
+            raise WalletError(f"the node refused content event {index}: {body}", 502)
+        sent += 1
+    return sent
 
 
 async def publish_forever(app: web.Application) -> None:

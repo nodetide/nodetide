@@ -355,7 +355,7 @@ def test_managed_org_still_keeps_claims_with_its_own_key():
     me = w.person()
     chain, key = w.org([(me, 100)], governance="managed")
     doc = ClaimDocument.create(chain.identity_hash, "email", "ops@example.org")
-    chain.append(AddClaimEvent.create(key, chain.head_hash, doc.claim_id, doc.claim_type, doc.commitment))
+    chain.append(AddClaimEvent.create(key, None, doc.claim_id, doc.claim_type, doc.commitment, seq=0, control_ref=chain.head_hash))
     assert chain.verify(w.resolve)[0]
 
 

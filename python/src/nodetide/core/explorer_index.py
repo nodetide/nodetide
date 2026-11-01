@@ -82,7 +82,7 @@ def event_rows(sigchain: Sigchain) -> list[tuple[Any, ...]]:
             event.signed_by,
             summarize_event(event),
         )
-        for index, event in enumerate(sigchain.events)
+        for index, event in enumerate(sigchain.all_events())
     ]
 
 
@@ -97,7 +97,7 @@ def identity_row(sigchain: Sigchain) -> tuple[Any, ...] | None:
         genesis.timestamp,
         sigchain.events[-1].timestamp,
         int(time.time()),
-        len(sigchain.events),
+        len(sigchain.all_events()),
         sigchain.head_hash,
         sigchain.get_current_master_key(),
         len(sigchain.get_active_devices()),

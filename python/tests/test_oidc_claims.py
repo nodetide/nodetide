@@ -422,3 +422,38 @@ async def test_birthdate_and_age_are_released_only_when_asked_for_and_presented(
     assert "birthdate" not in claims and "age_over_18" not in claims
     _, claims, _ = await sign_in(bridge, both, scope="openid age_over_18")
     assert claims["age_over_18"] is True and "birthdate" not in claims
+
+
+# --- a light presenter: control chain + a Merkle path for the one claim shown ---------------------------------
+
+
+async def test_a_claim_is_proven_with_a_merkle_path_when_the_node_holds_only_the_control_chain(bridge):
+    from nodetide.core.identity import Sigchain
+
+    h = bridge.holder
+    h.identity.checkpoint()                                   # commit the claims to the control chain
+    bridge.storage.save_sigchain(Sigchain.from_list(h.identity.sigchain.to_list(light=True)))
+    seq = next(i for i, e in enumerate(h.identity.sigchain.content) if getattr(e, "claim_id", None) == h.email_doc.claim_id)
+    proof = h.identity.sigchain.content_proof(seq)
+    presentation = {**h.email_presentation(), "claim_event": proof["event"], "claim_proof": proof["proof"]}
+
+    payload, claims, info = await sign_in(bridge, [presentation])
+    assert claims["email"] == ADDRESS and claims["email_verified"] is True
+    assert payload["claims"]["released"] == [{"claim_type": "email", "assurance": "low", "method": "email_code"}]
+
+
+async def test_a_wrong_or_missing_proof_releases_nothing(bridge):
+    from nodetide.core.identity import Sigchain
+
+    h = bridge.holder
+    h.identity.checkpoint()
+    bridge.storage.save_sigchain(Sigchain.from_list(h.identity.sigchain.to_list(light=True)))
+    seq = next(i for i, e in enumerate(h.identity.sigchain.content) if getattr(e, "claim_id", None) == h.email_doc.claim_id)
+    proof = h.identity.sigchain.content_proof(seq)
+
+    wrong = {**h.email_presentation(), "claim_event": proof["event"], "claim_proof": ["00" * 32] + proof["proof"][1:]}
+    payload, claims, _ = await sign_in(bridge, [wrong])
+    assert "email" not in claims and payload["claims"]["rejected"][0]["code"] == "bad_claim_proof"
+
+    payload, claims, _ = await sign_in(bridge, [h.email_presentation()])      # no proof: the node cannot see the claim
+    assert "email" not in claims and payload["claims"]["rejected"][0]["code"] in ("unknown_claim", "claim_mismatch")

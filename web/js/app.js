@@ -81,6 +81,35 @@
     return JSON.stringify(sortRecursive(obj)).replace(/[\u0080-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
   }
 
+  // Sigchain v2 (sigchain-v2.md): claims are CONTENT events; everything else is the control chain, whose events
+  // commit to the content so far with {count, root} (a Merkle root over the content events' hashes).
+  const CONTENT_TYPES = ['add_claim', 'set_claim_order'];
+
+  async function sha256Bytes(bytes) {
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  }
+
+  function concatBytes(...parts) {
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let offset = 0;
+    for (const p of parts) { out.set(p, offset); offset += p.length; }
+    return out;
+  }
+
+  async function merkleRootHex(hexHashes) {
+    /** Same tree as python/src/nodetide/core/merkle.py (RFC 6962 style). */
+    if (!hexHashes.length) return 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const leaves = [];
+    for (const h of hexHashes) leaves.push(await sha256Bytes(concatBytes(new Uint8Array([0]), decodeHex(h))));
+    async function root(nodes) {
+      if (nodes.length === 1) return nodes[0];
+      let k = 1;
+      while (k * 2 < nodes.length) k *= 2;
+      return sha256Bytes(concatBytes(new Uint8Array([1]), await root(nodes.slice(0, k)), await root(nodes.slice(k))));
+    }
+    return encodeHex(await root(leaves));
+  }
+
   async function sha256(data) {
     console.log('[sha256] called with:', typeof data, data?.length || data);
     if (!crypto || !crypto.subtle) {
@@ -495,8 +524,7 @@
       }
 
       const { master } = await this._unlockBoth(identity, identityPassword);
-      const chain = await api.request('GET', `/identities/${identityHash}/sigchain`);
-      const events = chain.events || [];
+      const { events, head: chainHead, commitment } = await Wallet.chain(identityHash);
       if (!events.length) throw new Error('Cannot determine the sigchain head');
       const event = {
         version: 1,
@@ -504,8 +532,9 @@
         alg: 'ed25519',
         hash_alg: 'sha256',
         timestamp: Math.floor(Date.now() / 1000),
-        prev: await sha256(canonicalize(events[events.length - 1])),
+        prev: chainHead,
         signed_by: master.signing.publicKey,
+        ...(commitment ? { content: commitment } : {}),
         primary_trustees: trustees,
         primary_threshold: threshold,
         backup_trustees: null,
@@ -522,7 +551,7 @@
 
     async _ownerApproval(owner, master, event) {
       /** This identity's approval of a governed event: signs the event body, bound to the owner and its chain state. */
-      const chain = await api.request('GET', `/identities/${owner.identityHash}/sigchain`);
+      const chain = await api.request('GET', `/identities/${owner.identityHash}/sigchain?light=1`);
       const events = chain.events || [];
       const state = await sha256(canonicalize(events[events.length - 1]));
       const { signature, approvals, ...signable } = event;
@@ -600,7 +629,7 @@
       if (!genesis || !(genesis.owners || []).some(o => o.identity === ownerHash)) throw new Error('The active identity is not an owner of that organization');
       if (genesis.governance !== 'managed') throw new Error('That organization manages its own devices: its own key authorizes them');
       const { master } = await this._unlockBoth(owner, ownerPassword);
-      const events = info.sigchain;
+      const events = (info.sigchain || []).filter(e => !CONTENT_TYPES.includes(e.type)); // the control chain
       const event = {
         version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
         prev: await sha256(canonicalize(events[events.length - 1])), signed_by: 'owners', signature: '',
@@ -636,7 +665,7 @@
       const trustee = this.getIdentity(trusteeHash);
       if (!trustee || !trustee.encryptedMasterKeys) throw new Error('This browser does not hold the trustee identity\'s master key');
       const { master } = await this._unlockBoth(trustee, password);
-      const chain = await api.request('GET', `/identities/${trusteeHash}/sigchain`);
+      const chain = await api.request('GET', `/identities/${trusteeHash}/sigchain?light=1`);
       const events = chain.events || [];
       const state = await sha256(canonicalize(events[events.length - 1]));
       const message = {
@@ -690,8 +719,11 @@
       let master;
       try { master = await Crypto.decryptWithPassword(pending.encryptedMaster, localPassword); } catch { throw new Error('Invalid password'); }
       const timestamp = Math.floor(Date.now() / 1000);
+      const { commitment } = await Wallet.chain(pending.identityHash);
+      const withCommitment = commitment ? { content: commitment } : {};
       const recovery = {
         version: 1, type: 'social_recovery', alg: 'ed25519', hash_alg: 'sha256', timestamp,
+        ...withCommitment,
         prev: status.prev, signed_by: master.signing.publicKey,
         new_pubkey: master.signing.publicKey, new_encryption_pubkey: master.encryption.publicKey,
         recovery_signatures: status.signatures.map(s => s.record),
@@ -704,7 +736,7 @@
         version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: timestamp + 1,
         prev: await sha256(canonicalize(recovery)), signed_by: master.signing.publicKey,
         device_pubkey: device.signing.publicKey, device_encryption_pubkey: device.encryption.publicKey,
-        label: 'Web Browser', capabilities: DEVICE_CAPABILITIES, expires: null,
+        label: 'Web Browser', capabilities: DEVICE_CAPABILITIES, expires: null, ...withCommitment,
       };
       addDevice.signature = Crypto.sign(canonicalize(addDevice), master.signing.secretKey);
       await api.submitEvent(pending.identityHash, addDevice);
@@ -1091,9 +1123,45 @@
     },
 
     async chain(hash) {
+      /** The whole chain, split: `events` is the control chain, `content` the claim track; `commitment` is what a control event signed now must carry. */
       const c = await api.request('GET', `/identities/${hash}/sigchain`);
-      const events = c.events || [];
-      return { events, head: await sha256(canonicalize(events[events.length - 1])) };
+      const all = c.events || [];
+      const events = all.filter(e => !CONTENT_TYPES.includes(e.type));
+      const content = all.filter(e => CONTENT_TYPES.includes(e.type)).sort((a, b) => a.seq - b.seq);
+      const head = await sha256(canonicalize(events[events.length - 1]));
+      const hashes = await Promise.all(content.map(e => sha256(canonicalize(e))));
+      return {
+        events, content, all, head, contentHead: hashes.length ? hashes[hashes.length - 1] : null,
+        commitment: content.length ? { count: content.length, root: await merkleRootHex(hashes) } : null,
+      };
+    },
+
+    committedCount(events) {
+      let n = 0;
+      for (const e of events) if (e.content && typeof e.content.count === 'number') n = Math.max(n, e.content.count);
+      return n;
+    },
+
+    async ensureCommitted(hash) {
+      /** A light verifier can only rely on content that a control event commits to: publish a checkpoint if some is not yet. */
+      const s = this.session(hash);
+      const chain = await this.chain(hash);
+      if (!chain.content.length || this.committedCount(chain.events) >= chain.content.length) return chain;
+      const event = {
+        version: 1, type: 'checkpoint', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: chain.head, signed_by: s.master.signing.publicKey, content: chain.commitment,
+      };
+      event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
+      await api.submitEvent(hash, event);
+      return this.chain(hash);
+    },
+
+    async claimProof(hash, claimId) {
+      /** The claim's event with its Merkle path to the control event that commits it (null if it is not committed yet). */
+      const chain = await this.chain(hash);
+      const seq = chain.content.findIndex(e => e.claim_id === claimId);
+      if (seq < 0) return null;
+      try { return await api.request('GET', `/identities/${hash}/content/${seq}`); } catch { return null; }
     },
 
     // ---- claims ----
@@ -1108,10 +1176,11 @@
       const claimId = this.newClaimId();
       const salt = encodeHex(crypto.getRandomValues(new Uint8Array(16)));
       const commitment = await this.commitment(claimId, type, salt, normalized);
-      const { head } = await this.chain(hash);
+      const chain = await this.chain(hash);
       const event = {
         version: 1, type: 'add_claim', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
-        prev: head, signed_by: s.master.signing.publicKey, claim_id: claimId, claim_type: type, commitment, expires: null,
+        prev: chain.contentHead, seq: chain.content.length, control_ref: chain.head,
+        signed_by: s.master.signing.publicKey, claim_id: claimId, claim_type: type, commitment, expires: null,
       };
       event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
       // keep the value before the chain commits to it: a commitment without its value could never be shown again
@@ -1143,10 +1212,11 @@
       const s = this.session(hash);
       const doc = s.data.claims[claimId];
       if (!doc || doc.renounced_at) throw new Error('Unknown or already renounced claim');
-      const { head } = await this.chain(hash);
+      const { head, commitment } = await this.chain(hash);
       const event = {
         version: 1, type: 'revoke_claim', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
         prev: head, signed_by: s.master.signing.publicKey, claim_id: claimId, reason: 'renounced by the holder',
+        ...(commitment ? { content: commitment } : {}),
       };
       event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
       await api.submitEvent(hash, event);
@@ -1167,7 +1237,7 @@
       if (!doc || doc.renounced_at) throw new Error('Unknown or renounced claim');
       const atts = s.data.attestations.filter(a => a.claim_id === claimId);
       if (!atts.length) throw new Error('This claim has no attestation yet');
-      const { events } = await this.chain(hash);
+      const { all: events } = await this.chain(hash);
       let published = 0;
       for (const att of atts) {
         const issuer = s.data.issuer_chains[att.issuer];
@@ -1187,7 +1257,7 @@
       const s = this.session(hash);
       const doc = s.data.claims[claimId];
       if (!doc) throw new Error('Unknown claim');
-      const { events } = await this.chain(hash);
+      const { all: events } = await this.chain(hash);
       const entries = [];
       const raw = [];
       let addedHash = null;
@@ -1196,25 +1266,25 @@
         const eventHash = await sha256(canonicalize(e));
         if (e.type === 'add_claim') {
           addedHash = eventHash;
-          entries.push({ t: e.timestamp, source: 'chain', label: `Claimed on your identity chain (${e.claim_type})`, hash: eventHash });
+          entries.push({ t: e.timestamp, rank: 0, source: 'chain', label: `Claimed on your identity chain (${e.claim_type})`, hash: eventHash });
           raw.push({ title: 'add_claim event (signed by your key, on the chain)', hash: eventHash, json: e });
         } else if (e.type === 'revoke_claim') {
-          entries.push({ t: e.timestamp, source: 'chain', label: 'Renounced on your identity chain', hash: eventHash });
+          entries.push({ t: e.timestamp, rank: 3, source: 'chain', label: 'Renounced on your identity chain', hash: eventHash });
           raw.push({ title: 'revoke_claim event (on the chain)', hash: eventHash, json: e });
         }
       }
       for (const h of s.data.history[claimId] || []) {
         if (h.kind === 'renounced') continue; // the chain event above says it
-        entries.push({ t: h.t, source: 'this browser', label: h.detail });
+        entries.push({ t: h.t, rank: 1, source: 'this browser', label: h.detail });
       }
       for (const a of s.data.attestations.filter(x => x.claim_id === claimId)) {
         const issuer = s.data.issuer_chains[a.issuer];
         const who = (issuer && issuer.name) || a.issuer.slice(0, 12);
-        entries.push({ t: a.issued_at, source: 'issuer', label: `Verified by ${who} (${a.method}, ${a.assurance} assurance)` });
-        entries.push({ t: a.expires_at, source: 'issuer', label: 'Attestation expires', future: a.expires_at > Math.floor(Date.now() / 1000) });
+        entries.push({ t: a.issued_at, rank: 2, source: 'issuer', label: `Verified by ${who} (${a.method}, ${a.assurance} assurance)` });
+        entries.push({ t: a.expires_at, rank: 4, source: 'issuer', label: 'Attestation expires', future: a.expires_at > Math.floor(Date.now() / 1000) });
         raw.push({ title: `attestation (signed by ${who}; the value is not in it)`, json: a });
       }
-      entries.sort((x, y) => x.t - y.t);
+      entries.sort((x, y) => (x.t - y.t) || (x.rank - y.rank)); // same second: claimed, then this browser, then issuer, then renounced
       const base = window.location.origin + '/explorer/#';
       return {
         entries, raw,
@@ -1245,7 +1315,7 @@
     async ensureDeviceMayAuthenticate(hash) {
       /** Older web identities were given capabilities that do not exist; re-authorize the device with the real ones. */
       const s = this.session(hash);
-      const { events, head } = await this.chain(hash);
+      const { events, head, commitment } = await this.chain(hash);
       let caps = [];
       for (const e of events) {
         if (e.type === 'add_device' && e.device_pubkey === s.device.signing.publicKey) caps = e.capabilities || [];
@@ -1255,6 +1325,7 @@
         version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
         prev: head, signed_by: s.master.signing.publicKey, device_pubkey: s.device.signing.publicKey,
         device_encryption_pubkey: s.device.encryption.publicKey, label: 'Web Browser', capabilities: DEVICE_CAPABILITIES, expires: null,
+        ...(commitment ? { content: commitment } : {}),
       };
       event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
       await api.submitEvent(hash, event);
@@ -1278,12 +1349,13 @@
       if (!doc || doc.renounced_at) throw new Error('Unknown or renounced claim');
       if (!['email', 'phone'].includes(doc.claim_type)) throw new Error('Only email and phone claims are verified with a code');
       await this.ensureDeviceMayAuthenticate(hash);
+      await this.ensureCommitted(hash); // the claim is committed before it is attested, so a light verifier can rely on it
       const challenge = await this.verifier('POST', '/api/auth/challenge', {});
       if (challenge.status === 503) throw new Error('The verification service is not ready yet: ' + (challenge.json.message || 'its issuer is not set up'));
       if (challenge.status !== 201) throw new Error(challenge.json.message || `The verification service refused a challenge (${challenge.status})`);
       const assertion = await this.assertion(hash, challenge.json, { purpose: 'claim_verification', claim_id: claimId });
-      const { events } = await this.chain(hash);
-      const started = await this.verifier('POST', `/api/verify/${doc.claim_type}/start`, { document: doc, assertion, sigchain: events });
+      const { all } = await this.chain(hash);
+      const started = await this.verifier('POST', `/api/verify/${doc.claim_type}/start`, { document: doc, assertion, sigchain: all });
       if (started.status !== 202) throw new Error(started.json.message || `Verification not started (${started.status})`);
       s.data.verifications[claimId] = { verification_id: started.json.verification_id, expires_at: started.json.expires_at, kind: doc.claim_type };
       this.note(s, claimId, 'code', `A code was requested from the verification service (valid until ${new Date(started.json.expires_at * 1000).toLocaleTimeString()})`);
@@ -1362,17 +1434,24 @@
       const chosen = preview.candidates.filter(c => shareIds.includes(c.attestation_id));
       const types = chosen.map(c => c.claim_type);
       if (new Set(types).size !== types.length) throw new Error('Choose one value per claim type (for example one email), not several');
-      const presentations = chosen.map(c => {
+      await this.ensureCommitted(hash);
+      // Light by default: the control chain, and for each shown claim its event with a Merkle path. If a claim cannot be
+      // proven that way (not committed), fall back to sending the whole chain.
+      let light = true;
+      const presentations = [];
+      for (const c of chosen) {
         const item = { document: s.data.claims[c.claim_id], attestation: c.att };
         const issuer = s.data.issuer_chains[c.att.issuer];
         if (issuer) item.issuer_sigchain = issuer.sigchain;
-        return item;
-      });
+        const proof = await this.claimProof(hash, c.claim_id);
+        if (proof) { item.claim_event = proof.event; item.claim_proof = proof.proof; } else { light = false; }
+        presentations.push(item);
+      }
       const assertion = await this.assertion(hash, preview.challenge.request, null);
-      const { events } = await this.chain(hash);
+      const chain = await this.chain(hash);
       const response = await fetch(preview.challenge.respond_url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assertion, sigchain: events, presentations }),
+        body: JSON.stringify({ assertion, sigchain: light ? chain.events : chain.all, presentations }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message || body.error || 'The sign-in was refused (' + response.status + ')');

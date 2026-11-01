@@ -49,7 +49,8 @@ async def pair(node, monkeypatch, tmp_path):
 
 
 async def sigchain_length(node, identity: str) -> int:
-    return (await (await node.get(f"/api/identities/{identity}/sigchain")).json())["length"]
+    body = await (await node.get(f"/api/identities/{identity}/sigchain")).json()
+    return body["length"] + body["content_length"]  # control events plus content events
 
 
 async def test_second_wallet_pairs_and_then_adds_claims_as_a_device(node, pair):

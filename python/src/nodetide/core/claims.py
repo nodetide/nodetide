@@ -546,6 +546,10 @@ def verify_attestation(
     if subject_chain.identity_hash != att.subject:
         return Check.fail("subject_mismatch", "Sigchain does not belong to the subject")
 
+    # Behind, not wrong: the attestation was made against control state this chain does not have yet
+    if not any(e.event_hash() == att.chain_head for e in subject_chain.events):
+        return Check.fail("unknown_chain_head", "Attestation refers to a newer chain state; fetch the latest sigchain")
+
     record = subject_chain.get_claim(att.claim_id)
     if record is None:
         return Check.fail("unknown_claim", "The subject has no such claim")

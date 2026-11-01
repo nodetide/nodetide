@@ -17,6 +17,7 @@ from nodetide.core.identity import (
     SigchainEvent,
     GenesisEvent,
     SocialRecoveryEvent,
+    CONTENT_TYPES,
     check_recovery_signature,
 )
 from nodetide.core.storage import Storage
@@ -54,6 +55,9 @@ def error_response(error: ErrorCode, message: str, status: int, details: dict | 
 
 
 # Identity routes
+
+CONTENT_EVENT_TYPES = tuple(t.value for t in CONTENT_TYPES)
+
 
 async def create_identity(request: web.Request) -> web.Response:
     """POST /identities - Create identity with genesis event."""
@@ -220,13 +224,19 @@ async def get_sigchain(request: web.Request) -> web.Response:
     if not sigchain:
         return error_response(ErrorCode.NOT_FOUND, f"Identity {identity_hash} not found", 404)
 
+    light = request.query.get("light") in ("1", "true")
     return web.json_response(
         SigchainResponse(
             identity_hash=identity_hash,
             head_hash=sigchain.head_hash or "",
             length=len(sigchain.events),
-            events=sigchain.to_list(),
-        ).to_dict()
+            events=sigchain.to_list(light=light),
+        ).to_dict() | {
+            "light": light,
+            "content_length": len(sigchain.content),
+            "commitment": sigchain.content_commitment(),
+            "content_head": sigchain.content_head,
+        }
     )
 
 
@@ -246,15 +256,20 @@ async def submit_event(request: web.Request) -> web.Response:
         if not event_data:
             return error_response(ErrorCode.INVALID_REQUEST, "Missing event", 400)
 
-        # Check prev hash
-        if event_data.get("prev") != sigchain.head_hash:
+        # Check prev hash: control events follow the control chain, content events the content track
+        is_content = event_data.get("type") in CONTENT_EVENT_TYPES
+        expected_prev = sigchain.content_head if is_content else sigchain.head_hash
+        if event_data.get("prev") != expected_prev:
             return error_response(
                 ErrorCode.STALE_STATE,
                 "prev hash mismatch - client has stale state",
                 409,
                 details={
-                    "expected_prev": sigchain.head_hash,
+                    "expected_prev": expected_prev,
                     "received_prev": event_data.get("prev"),
+                    "track": "content" if is_content else "control",
+                    "control_head": sigchain.head_hash,
+                    "content_length": len(sigchain.content),
                 },
             )
 
@@ -270,6 +285,12 @@ async def submit_event(request: web.Request) -> web.Response:
         # Verify updated sigchain (an organization's owner approvals are checked against the owners' chains here)
         valid, err = sigchain.verify(storage.get_sigchain, check_current=True)
         if not valid:
+            if err and "behind:" in err:
+                # not wrong, just ahead of this node: the client has to bring the control events it relies on first
+                return error_response(
+                    ErrorCode.STALE_STATE, err, 409,
+                    details={"control_head": storage.get_sigchain(identity_hash).head_hash, "behind": True},
+                )
             return error_response(ErrorCode.INVALID_SIGCHAIN, err or "Invalid sigchain after append", 400)
 
         if isinstance(event, SocialRecoveryEvent):
@@ -290,7 +311,7 @@ async def submit_event(request: web.Request) -> web.Response:
                 accepted=True,
                 event_hash=event.event_hash(),
                 sigchain_length=len(sigchain.events),
-            ).to_dict(),
+            ).to_dict() | {"track": "content" if is_content else "control", "content_length": len(sigchain.content)},
             status=201,
         )
 
@@ -298,6 +319,23 @@ async def submit_event(request: web.Request) -> web.Response:
         return error_response(ErrorCode.INVALID_REQUEST, "Invalid JSON", 400)
     except Exception as e:
         return error_response(ErrorCode.INVALID_REQUEST, str(e), 400)
+
+
+async def get_content_event(request: web.Request) -> web.Response:
+    """GET /identities/{hash}/content/{seq} - one content event with its Merkle path to the control event that commits it.
+
+    This is what a light client asks for instead of downloading the whole content track.
+    """
+    storage: Storage = request.app["storage"]
+    identity_hash = request.match_info["hash"]
+    sigchain = storage.get_sigchain(identity_hash)
+    if not sigchain:
+        return error_response(ErrorCode.NOT_FOUND, f"Identity {identity_hash} not found", 404)
+    try:
+        seq = int(request.match_info["seq"])
+        return web.json_response(sigchain.content_proof(seq))
+    except (ValueError, IndexError):
+        return error_response(ErrorCode.NOT_FOUND, "No such content event, or it is not committed by a control event yet", 404)
 
 
 async def list_devices(request: web.Request) -> web.Response:
@@ -1026,6 +1064,7 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/api/identities/{hash}", get_identity)
     app.router.add_get("/api/identities/{hash}/sigchain", get_sigchain)
     app.router.add_post("/api/identities/{hash}/events", submit_event)
+    app.router.add_get("/api/identities/{hash}/content/{seq}", get_content_event)
     app.router.add_get("/api/identities/{hash}/devices", list_devices)
 
     # Session routes

@@ -158,13 +158,27 @@ def choose_sigchain(
         return stored, None
     if stored is None:
         return provided, None
-    s_hashes = [e.event_hash() for e in stored.events]
-    p_hashes = [e.event_hash() for e in provided.events]
-    if p_hashes[: len(s_hashes)] == s_hashes:
-        return provided, None
-    if s_hashes[: len(p_hashes)] == p_hashes:
+
+    def longer(a: list, b: list) -> list | None:
+        """The one of two hash lists that extends the other, or None when they diverge."""
+        n = min(len(a), len(b))
+        if a[:n] != b[:n]:
+            return None
+        return a if len(a) >= len(b) else b
+
+    control = longer([e.event_hash() for e in stored.events], [e.event_hash() for e in provided.events])
+    content = longer([e.event_hash() for e in stored.content], [e.event_hash() for e in provided.content])
+    if control is None or content is None:
+        return None, "conflict"
+    # control and content may each be longer on a different side (a light copy is newer in control but has no content)
+    best_control = provided.events if len(provided.events) > len(stored.events) else stored.events
+    best_content = provided.content if len(provided.content) > len(stored.content) else stored.content
+    if best_control is stored.events and best_content is stored.content:
         return stored, None
-    return None, "conflict"
+    if best_control is provided.events and best_content is provided.content:
+        return provided, None
+    merged = Sigchain(events=list(best_control), content=list(best_content))
+    return merged, None
 
 
 @dataclass

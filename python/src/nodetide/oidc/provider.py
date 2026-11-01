@@ -35,7 +35,7 @@ from nodetide.core.auth import (
     verify_assertion,
 )
 from nodetide.core.claims import Attestation, ClaimDocument, ClaimError
-from nodetide.core.identity import Sigchain
+from nodetide.core.identity import Sigchain, SigchainEvent
 from nodetide.core.relying_party import ASSURANCE_RANK, ClaimRule, VerifiedClaim, evaluate_claim
 from nodetide.core.storage import Storage
 from nodetide.oidc.config import OIDCClient, OIDCConfig
@@ -392,6 +392,16 @@ class OIDCProvider:
             except (ClaimError, AttributeError):
                 report["rejected"].append({"claim_type": None, "code": "invalid_presentation"})
                 continue
+            # A light presenter sends the control chain only, and for each claim the event with its Merkle path
+            if isinstance(item.get("claim_event"), dict):
+                try:
+                    problem = chain.attach_content(SigchainEvent.from_dict(item["claim_event"]), item.get("claim_proof") or [])
+                except Exception:
+                    problem = "malformed claim event"
+                if problem:
+                    code = "behind" if problem.startswith("behind:") else "bad_claim_proof"
+                    report["rejected"].append({"claim_type": attestation.claim_type, "code": code, "detail": problem})
+                    continue
             claim_type = attestation.claim_type
             rule = self.claim_rules.get(claim_type)
             if claim_type not in wanted or rule is None:
