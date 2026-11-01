@@ -107,6 +107,44 @@
       color: white;
     }
 
+
+    /* Sub-tabs inside a view (My Identity) */
+    .subtabs {
+      display: flex;
+      gap: 0.25rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+
+    .subtabs button {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 0.45rem 0.9rem;
+      border-radius: 0.25rem;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: 0.9rem;
+    }
+
+    .subtabs button:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .subtabs button.active { background: var(--accent); color: white; }
+
+    .subtab-dot {
+      display: inline-block;
+      width: 0.5rem;
+      height: 0.5rem;
+      margin-left: 0.35rem;
+      border-radius: 50%;
+      background: var(--warning, #e0a000);
+    }
+
+    .wallet-bar { padding: 0.6rem 1rem; }
+    .wallet-bar-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .wallet-bar-row input { max-width: 16rem; margin: 0; }
+
     /* Cards */
     .card {
       background: var(--bg-secondary);
@@ -937,7 +975,41 @@
       </template>
 
       <template x-if="identity">
-        <div class="grid grid-2">
+            <div x-data="walletUI" x-effect="$store.wallet.unlocked; $store.identity.activeHash; refresh()">
+          <!-- One wallet bar for every tab: the keys are unlocked here, once -->
+          <div class="card wallet-bar" x-show="$store.identity.activeHash">
+            <template x-if="!unlocked">
+              <form @submit.prevent="unlock" class="wallet-bar-row">
+                <strong>Wallet locked</strong>
+                <input type="password" x-model="password" placeholder="Identity password" autocomplete="current-password" required>
+                <button type="submit" class="btn btn-small" :disabled="$store.app.loading">Unlock</button>
+                <button type="button" class="btn btn-small btn-secondary" x-show="hasPasskey && canPasskey" @click="unlockWithPasskey()"
+                        :disabled="$store.app.loading" data-testid="unlock-passkey">Unlock with passkey</button>
+                <details class="text-small text-muted" style="flex-basis: 100%">
+                  <summary>What does unlocking do?</summary>
+                  Your claims and attestations are encrypted in this browser with your identity's password. They are decrypted into memory only while the wallet
+                  is unlocked (it locks itself after 15 idle minutes) and never leave the browser, except what you choose to show. Changing devices, distribution
+                  points or the DNS record also needs it, because those are signed with your master key.
+                </details>
+              </form>
+            </template>
+            <template x-if="unlocked">
+              <div class="wallet-bar-row">
+                <span><strong>Wallet unlocked</strong> <span class="text-small text-muted">(locks itself after 15 idle minutes)</span></span>
+                <button type="button" class="btn btn-small btn-secondary" @click="lock()">Lock</button>
+              </div>
+            </template>
+          </div>
+
+          <div class="subtabs" role="tablist">
+            <template x-for="t in tabs" :key="t.id">
+              <button type="button" role="tab" :class="{ active: tab === t.id }" :aria-selected="tab === t.id" @click="setTab(t.id)">
+                <span x-text="t.label"></span><span class="subtab-dot" x-show="t.id === 'orgs' && $store.app.orgPending" title="A verification service is waiting for your approval"></span>
+              </button>
+            </template>
+          </div>
+
+          <div x-show="tab === 'overview'" class="grid grid-2" role="tabpanel" x-cloak>
           <div class="card" x-data="{ showRaw: false }">
             <div class="card-header">
               <span class="card-title">Identity Info</span>
@@ -969,27 +1041,32 @@
               <pre class="raw-json" x-text="JSON.stringify(identity, null, 2)"></pre>
             </template>
           </div>
-
-          <!-- Your claims, their verification and the organizations you own: kept in this browser (encrypted, unlocked in memory only) -->
-          <div x-data="walletUI" x-effect="$store.wallet.unlocked; $store.identity.activeHash; refresh()">
-      <div class="card" x-show="$store.identity.activeHash && !unlocked">
-        <div class="card-header"><span class="card-title">Unlock the wallet</span></div>
-        <p class="text-small text-muted mb-1">
-          Your claims and attestations are encrypted in this browser with your identity's password. They are decrypted
-          into memory only while the wallet is unlocked (it locks itself after 15 idle minutes) and never leave the browser,
-          except what you choose to show.
-        </p>
-        <form @submit.prevent="unlock">
-          <div class="form-group">
-            <label>Identity password</label>
-            <input type="password" x-model="password" autocomplete="current-password" required>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Share Identity</span>
+            </div>
+            <div x-data="qrManager" x-init="showIdentityQR(identity?.identityHash, distributionPoints, sigchain?.[0]?.pubkey)">
+              <div class="text-center mb-1">
+                <div x-ref="qrContainer" style="display: inline-block; background: white; padding: 1rem; border-radius: 0.5rem;"></div>
+              </div>
+              <p class="text-small text-muted text-center">
+                Scan this QR code to share your identity with others.
+              </p>
+              <div class="flex gap-1 mt-1" style="justify-content: center">
+                <button class="btn btn-small btn-secondary" @click="copyIdentityHash">Copy Hash</button>
+                <button class="btn btn-small btn-secondary" @click="startScan" x-show="!scanning">Scan QR</button>
+                <button class="btn btn-small btn-danger" @click="stopScan" x-show="scanning">Stop Scan</button>
+              </div>
+              <div x-ref="scanContainer" x-show="scanning" class="mt-1 text-center"></div>
+            </div>
           </div>
-          <button type="submit" class="btn" :disabled="$store.app.loading">Unlock</button>
-          <button type="button" class="btn btn-secondary" x-show="hasPasskey && canPasskey" @click="unlockWithPasskey()"
-                  :disabled="$store.app.loading" data-testid="unlock-passkey">Unlock with passkey</button>
-        </form>
-      </div>
+          </div>
 
+          <div x-show="tab === 'claims'" role="tabpanel" x-cloak>
+            <div class="card" x-show="!unlocked">
+              <div class="card-header"><span class="card-title">Claims</span></div>
+              <p class="text-muted">Unlock the wallet above to see and add your claims. They are kept encrypted in this browser.</p>
+            </div>
       <div x-show="unlocked">
         <div class="card">
           <div class="card-header">
@@ -1080,6 +1157,81 @@
           </p>
         </div>
       </div>
+          </div>
+
+          <div x-show="tab === 'devices'" class="grid grid-2" role="tabpanel" x-cloak>
+          <div class="card" x-data="{ showRaw: false }">
+            <div class="card-header">
+              <span class="card-title">Devices (<span x-text="activeDevices.length"></span>)</span>
+              <button class="raw-toggle" :class="{ active: showRaw }" @click="showRaw = !showRaw">
+                <span x-text="showRaw ? 'Formatted' : 'Raw'"></span>
+              </button>
+            </div>
+            <template x-if="activeDevices.length === 0 && !showRaw">
+              <p class="text-muted">No additional devices.</p>
+            </template>
+            <template x-if="!showRaw">
+              <div>
+                <template x-for="device in activeDevices">
+                  <div class="identity-item">
+                    <div class="identity-info">
+                      <div class="identity-name" x-text="device.label || 'Unnamed Device'"></div>
+                      <div class="identity-hash" x-text="device.pubkey.slice(0, 16) + '...'"></div>
+                      <div class="text-small">
+                        <template x-for="cap in device.capabilities">
+                          <span class="badge" x-text="cap" style="margin-right: 0.25rem"></span>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="showRaw">
+              <pre class="raw-json" x-text="JSON.stringify(activeDevices, null, 2)"></pre>
+            </template>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Recovery</span>
+            </div>
+            <template x-if="!recovery">
+              <p class="text-muted">No recovery trustees configured.</p>
+            </template>
+            <template x-if="recovery">
+              <div>
+                <div class="form-group">
+                  <label>Threshold</label>
+                  <div x-text="recovery.threshold + ' of ' + recovery.trustees.length + ' trustees'"></div>
+                </div>
+                <div class="form-group">
+                  <label>Trustees</label>
+                  <template x-for="trustee in recovery.trustees">
+                    <div class="identity-hash" x-text="trustee"></div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+          </div>
+
+          <div x-show="tab === 'publish'" class="grid grid-2" role="tabpanel" x-cloak>
+          <div class="card">
+            <div class="card-header flex flex-between">
+              <span class="card-title">Distribution Points</span>
+              <button class="btn btn-small btn-secondary" @click="openDistributionModal">Edit</button>
+            </div>
+            <template x-if="distributionPoints.length === 0">
+              <p class="text-muted">No distribution points configured.</p>
+            </template>
+            <template x-if="distributionPoints.length > 0">
+              <div>
+                <template x-for="point in distributionPoints">
+                  <div class="identity-hash" style="word-break: break-all; margin-bottom: 0.25rem" x-text="point"></div>
+                </template>
+              </div>
+            </template>
+          </div>
         <div class="card" x-data="stateRecordUI" x-show="$store.identity.activeHash" x-effect="$store.identity.activeHash; $store.wallet.unlocked; prepare()">
           <div class="card-header">
             <span class="card-title">DNS state record</span>
@@ -1131,7 +1283,9 @@
             </div>
           </template>
         </div>
+          </div>
 
+          <div x-show="tab === 'orgs'" role="tabpanel" x-cloak>
         <div class="card" x-data="protectionUI" x-show="$store.identity.activeHash" x-init="fetchRequest(true); loadOrgs()"
              x-effect="$store.identity.activeHash; loadOrgs()">
           <div class="card-header">
@@ -1224,100 +1378,9 @@
             <button type="submit" class="btn" :disabled="$store.app.loading">Authorize the key</button>
           </form>
         </div>
-    </div>
-
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Share Identity</span>
-            </div>
-            <div x-data="qrManager" x-init="showIdentityQR(identity?.identityHash, distributionPoints, sigchain?.[0]?.pubkey)">
-              <div class="text-center mb-1">
-                <div x-ref="qrContainer" style="display: inline-block; background: white; padding: 1rem; border-radius: 0.5rem;"></div>
-              </div>
-              <p class="text-small text-muted text-center">
-                Scan this QR code to share your identity with others.
-              </p>
-              <div class="flex gap-1 mt-1" style="justify-content: center">
-                <button class="btn btn-small btn-secondary" @click="copyIdentityHash">Copy Hash</button>
-                <button class="btn btn-small btn-secondary" @click="startScan" x-show="!scanning">Scan QR</button>
-                <button class="btn btn-small btn-danger" @click="stopScan" x-show="scanning">Stop Scan</button>
-              </div>
-              <div x-ref="scanContainer" x-show="scanning" class="mt-1 text-center"></div>
-            </div>
           </div>
 
-          <div class="card">
-            <div class="card-header">
-              <span class="card-title">Recovery</span>
-            </div>
-            <template x-if="!recovery">
-              <p class="text-muted">No recovery trustees configured.</p>
-            </template>
-            <template x-if="recovery">
-              <div>
-                <div class="form-group">
-                  <label>Threshold</label>
-                  <div x-text="recovery.threshold + ' of ' + recovery.trustees.length + ' trustees'"></div>
-                </div>
-                <div class="form-group">
-                  <label>Trustees</label>
-                  <template x-for="trustee in recovery.trustees">
-                    <div class="identity-hash" x-text="trustee"></div>
-                  </template>
-                </div>
-              </div>
-            </template>
-          </div>
-
-          <div class="card">
-            <div class="card-header flex flex-between">
-              <span class="card-title">Distribution Points</span>
-              <button class="btn btn-small btn-secondary" @click="openDistributionModal">Edit</button>
-            </div>
-            <template x-if="distributionPoints.length === 0">
-              <p class="text-muted">No distribution points configured.</p>
-            </template>
-            <template x-if="distributionPoints.length > 0">
-              <div>
-                <template x-for="point in distributionPoints">
-                  <div class="identity-hash" style="word-break: break-all; margin-bottom: 0.25rem" x-text="point"></div>
-                </template>
-              </div>
-            </template>
-          </div>
-
-          <div class="card" x-data="{ showRaw: false }">
-            <div class="card-header">
-              <span class="card-title">Devices (<span x-text="activeDevices.length"></span>)</span>
-              <button class="raw-toggle" :class="{ active: showRaw }" @click="showRaw = !showRaw">
-                <span x-text="showRaw ? 'Formatted' : 'Raw'"></span>
-              </button>
-            </div>
-            <template x-if="activeDevices.length === 0 && !showRaw">
-              <p class="text-muted">No additional devices.</p>
-            </template>
-            <template x-if="!showRaw">
-              <div>
-                <template x-for="device in activeDevices">
-                  <div class="identity-item">
-                    <div class="identity-info">
-                      <div class="identity-name" x-text="device.label || 'Unnamed Device'"></div>
-                      <div class="identity-hash" x-text="device.pubkey.slice(0, 16) + '...'"></div>
-                      <div class="text-small">
-                        <template x-for="cap in device.capabilities">
-                          <span class="badge" x-text="cap" style="margin-right: 0.25rem"></span>
-                        </template>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </div>
-            </template>
-            <template x-if="showRaw">
-              <pre class="raw-json" x-text="JSON.stringify(activeDevices, null, 2)"></pre>
-            </template>
-          </div>
-
+          <div x-show="tab === 'history'" role="tabpanel" x-cloak>
           <div class="card" x-data="{ showRaw: false }">
             <div class="card-header">
               <span class="card-title">Sigchain (<span x-text="sigchain.length"></span> events)</span>
@@ -1357,7 +1420,9 @@
               <pre class="raw-json" x-text="JSON.stringify(sigchain, null, 2)"></pre>
             </template>
           </div>
-        </div>
+          </div>
+
+            </div>
       </template>
 
       <!-- Distribution Points Modal -->
@@ -1369,14 +1434,17 @@
           </div>
 
           <p class="text-small text-muted mb-1">
-            Distribution points are URIs where this identity can be reached. One per line.
+            Distribution points say where others can find this identity: a node (<code>https://...</code>), a mailbox that answers by email
+            (<code>mailto:chains@node.example</code>) or a domain that publishes your DNS state record (<code>dns:example.org</code>). One per line.
+            This is signed with your master key, so the wallet has to be unlocked.
           </p>
 
           <form @submit.prevent="saveDistributionPoints">
             <div class="form-group">
               <label>Distribution Points</label>
               <textarea x-model="editDistributionPoints" rows="5"
-                        placeholder="https://relay.example.com/users/me&#10;mailto:me@example.com&#10;dtn://node.local:4556"></textarea>
+                        placeholder="https://relay.example.com/users/me&#10;mailto:chains@node.example&#10;dns:example.org"></textarea>
+              <small x-show="distributionError" x-text="distributionError" style="color: var(--danger, #c0392b)"></small>
             </div>
 
             <div class="flex gap-1">

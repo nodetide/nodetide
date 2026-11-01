@@ -95,6 +95,11 @@ async def test_claim_verification_persistence_and_backup(monkeypatch):
 
                 # the organizations card is on the My Identity tab, visible even while the wallet is locked
                 await page.js("Alpine.store('app').setView('identity')")
+                # the identity view has sub-tabs; the organizations card is on its own tab, reachable while the wallet is locked
+                assert await page.js(f"{comp('[x-data=identityDetail]')}.tab") == "overview"
+                await asyncio.sleep(0.5)
+                await page.js(f"{comp('[x-data=identityDetail]')}.setTab('orgs')")
+                await asyncio.sleep(0.4)
                 assert await page.js("""(()=>{const e=[...document.querySelectorAll('.card-title')]
                     .find(x=>x.textContent.includes('Organizations you own')); return !!e && e.offsetParent!==null})()""")
 

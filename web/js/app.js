@@ -142,6 +142,28 @@
     },
   };
 
+  // What a distribution point may be (the same rules the CLI applies and the readers enforce): a node URL, a plain mailbox, a DNS domain.
+  const DistributionPoints = {
+    check(points) {
+      if (points.length > 16) return 'At most 16 distribution points.';
+      for (const p of points) {
+        if (p.length > 300) return `Too long: ${p.slice(0, 40)}...`;
+        if (/^mailto:/i.test(p)) {
+          if (!/^mailto:[a-z0-9._%+-]{1,64}@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/i.test(p)) {
+            return `${p}: use a single plain address, like mailto:chains@node.example (no ?subject=, name or list).`;
+          }
+        } else if (/^dns:/i.test(p)) {
+          if (!NodetideState.normalizeDomain(p)) return `${p}: use a public domain name, like dns:example.org.`;
+        } else if (/^https?:\/\//i.test(p)) {
+          try { if (!new URL(p).hostname) return `${p}: no host name.`; } catch { return `${p}: not a valid address.`; }
+        } else if (!/^[a-z][a-z0-9+.-]*:\S+$/i.test(p)) {
+          return `${p}: write it as an address with a scheme, like https://..., mailto:... or dns:example.org.`;
+        }
+      }
+      return '';
+    },
+  };
+
   const Crypto = {
     generateKeyPair() {
       const signKp = nacl.sign.keyPair();
@@ -1374,6 +1396,19 @@
     },
 
     // ---- verification service ----
+    async setDistribution(hash, points) {
+      /** A set_distribution control event, signed by the master key. It follows the last CONTROL event and commits to the claims so far (sigchain-v2.md). */
+      const s = this.session(hash);
+      const chain = await this.chain(hash);
+      const event = {
+        version: 1, type: 'set_distribution', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: chain.head, signed_by: s.master.signing.publicKey, distribution_points: points,
+      };
+      if (chain.commitment) event.content = chain.commitment;
+      event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
+      await api.submitEvent(hash, event);
+    },
+
     async stateRecord(hash, domainInput, days) {
       /** The DNS TXT record for this identity's current state, signed with the master key (state-record.md). */
       const s = this.session(hash);
@@ -1754,6 +1789,7 @@
       initialized: false,
       online: navigator.onLine,
       currentView: 'identities',
+      orgPending: false,
       loading: false,
       error: null,
       success: null,
@@ -2250,6 +2286,7 @@
           if (body.status === 'founded') { if (!quiet) Alpine.store('app').showSuccess('The verification service is already set up.'); return; }
           this.org.request = JSON.stringify(body);
           this.org.service = body.name || 'the verification service';
+          Alpine.store('app').orgPending = true;
         } catch (e) {
           if (!quiet) Alpine.store('app').showError('Could not reach the verification service: ' + e.message);
         }
@@ -2261,6 +2298,7 @@
           this.org.result = await KeyStore.approveOrganization(
             Alpine.store('identity').activeHash, this.org.password, this.org.request, this.org.since);
           this.org.password = '';
+          Alpine.store('app').orgPending = false;
           this.loadOrgs();
           const replaced = this.org.result.kind === 'replace';
           Alpine.store('app').showSuccess(this.org.result.complete
@@ -2476,6 +2514,15 @@
 
     // Identity detail
     Alpine.data('identityDetail', () => ({
+      tabs: [
+        { id: 'overview', label: 'Overview' },
+        { id: 'claims', label: 'Claims' },
+        { id: 'devices', label: 'Devices & recovery' },
+        { id: 'publish', label: 'Publish' },
+        { id: 'orgs', label: 'Organizations' },
+        { id: 'history', label: 'History' },
+      ],
+      tab: 'overview',
       sigchain: [],
       devices: [],
       recovery: null,
@@ -2484,11 +2531,22 @@
       lastLoadedHash: null,
       showDistributionModal: false,
       editDistributionPoints: '',
+      distributionError: '',
 
       // Use store for identity
       get identity() { return Alpine.store('identity').activeIdentity; },
 
+      setTab(id) {
+        if (!this.tabs.some(t => t.id === id)) return;
+        this.tab = id;
+        try { localStorage.setItem('nodetide_identity_tab', id); } catch { /* private mode: the tab is just not remembered */ }
+      },
+
       init() {
+        try {
+          const saved = localStorage.getItem('nodetide_identity_tab');
+          if (saved && this.tabs.some(t => t.id === saved)) this.tab = saved;
+        } catch { /* ignore */ }
         // Watch for view changes to reload when becoming visible
         this.$watch('$store.app.currentView', (view) => {
           if (view === 'identity') {
@@ -2584,63 +2642,35 @@
 
       openDistributionModal() {
         const activeHash = Alpine.store('identity').activeHash;
-        if (!SessionKeys.isUnlocked(activeHash)) {
-          Alpine.store('app').showError('Identity must be unlocked first');
+        if (!WalletSession.isUnlocked(activeHash) && !SessionKeys.isUnlocked(activeHash)) {
+          Alpine.store('app').showError('Unlock the wallet first (the bar above): distribution points are signed with your master key.');
           return;
         }
         this.editDistributionPoints = this.distributionPoints.join('\n');
+        this.distributionError = '';
         this.showDistributionModal = true;
       },
 
       async saveDistributionPoints() {
         const activeHash = Alpine.store('identity').activeHash;
-        console.log('[saveDistributionPoints] activeHash:', activeHash);
-        console.log('[saveDistributionPoints] this.sigchain.length:', this.sigchain.length);
-        console.log('[saveDistributionPoints] this.sigchain:', this.sigchain);
-
-        const keyPair = SessionKeys.get(activeHash);
-        if (!keyPair) {
-          Alpine.store('app').showError('Identity must be unlocked');
-          return;
-        }
-
-        const points = this.editDistributionPoints
-          .split(/[\n,]/)
-          .map(s => s.trim())
-          .filter(s => s);
-
-        // Get prev hash (last event in sigchain)
-        const prevHash = this.sigchain.length > 0
-          ? await this.getEventHash(this.sigchain[this.sigchain.length - 1])
-          : null;
-        console.log('[saveDistributionPoints] prevHash:', prevHash);
-
-        if (!prevHash) {
-          Alpine.store('app').showError('Cannot determine sigchain head');
-          return;
-        }
-
-        Alpine.store('app').loading = true;
-
+        const points = this.editDistributionPoints.split(/[\n,]/).map(p => p.trim()).filter(Boolean);
+        const problem = DistributionPoints.check(points);
+        if (problem) { this.distributionError = problem; return; }
+        this.distributionError = '';
+        const app = Alpine.store('app');
+        app.loading = true;
         try {
-          const event = api.createSetDistributionEvent(keyPair, prevHash, points);
-          await api.submitEvent(activeHash, event);
-
+          await Wallet.setDistribution(activeHash, points);
           this.distributionPoints = points;
-          this.sigchain.push(event);
           this.showDistributionModal = false;
-          Alpine.store('app').showSuccess('Distribution points updated');
+          this.lastLoadedHash = null;
+          await this.load();                      // the new event is part of the chain shown on the other tabs
+          app.showSuccess('Distribution points updated');
         } catch (e) {
-          Alpine.store('app').showError('Failed to update: ' + e.message);
+          this.distributionError = 'Could not update: ' + e.message;
         } finally {
-          Alpine.store('app').loading = false;
+          app.loading = false;
         }
-      },
-
-      async getEventHash(event) {
-        // Compute SHA-256 hash of canonical JSON
-        const canonical = JSON.stringify(event, Object.keys(event).sort());
-        return await Crypto.sha256Hex(canonical);
       },
 
       get activeDevices() { return this.devices; },

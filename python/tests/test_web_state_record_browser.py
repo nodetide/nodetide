@@ -65,6 +65,9 @@ async def test_the_identity_tab_makes_a_record_python_accepts():
                 identity = await page.js("Alpine.store('identity').activeHash")
                 await page.js("Alpine.store('app').setView('identity')")
                 card = comp("[x-data=stateRecordUI]")
+                await asyncio.sleep(0.8)
+                await page.js(f"{comp('[x-data=identityDetail]')}.setTab('publish')")      # the record is made on the Publish tab
+                await asyncio.sleep(0.4)
 
                 # the card is there; while the wallet is locked nothing is made
                 assert await page.js("""(()=>{const e=[...document.querySelectorAll('.card-title')]

@@ -35,7 +35,7 @@ full hash is inside the record and checked). Whoever controls the domain publish
 
 ## Use
 
-* **Publish:** in the web client, **My Identity > DNS state record** (unlock the wallet, enter the domain, choose how long it is valid): it shows the zone-file line, copy buttons, and the list of devices
+* **Publish:** in the web client, **My Identity > Publish > DNS state record** (unlock the wallet, enter the domain, choose how long it is valid): it shows the zone-file line, copy buttons, and the list of devices
   the record lists so you can check they are yours. Or from the CLI: `nodetide identity set-distribution -d dns:example.org`, then `nodetide identity dns-record` prints the name and the quoted TXT strings (or `--json`). Republish when devices change and
   before `exp`. Automate it with whatever manages the zone.
 * **Node (native auth, `/api/auth/verify` and `/login`):** when there is no chain for the signer, or the stored one is behind (`unknown_chain_head`), the node checks the assertion against a state: one the
