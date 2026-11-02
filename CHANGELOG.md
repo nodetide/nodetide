@@ -3,6 +3,12 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Android: switching accounts)
+
+- **Fixed: switching accounts froze the app.** Every screen that shows the current account collected the account book separately, and each collection decrypted it with the hardware-backed key - on the main thread, one StrongBox operation at a time -
+  and a switch also re-encrypted the whole book. Now the book is opened **once per change, on a background thread, in one shared flow**; **the active account is its own small setting** next to the sealed book, so switching writes a few bytes and
+  encrypts nothing; if the accounts could not be opened (the Keystore refuses while the phone is locked) the app tries again when it comes to the front instead of staying stuck. The time to open and to seal is logged (`IdentityStore`) so a slow phone is visible.
+
 ## 2026-11-02 (Android: the Accounts screen)
 
 - **Fixed on the phone** (found by the first real use of a paired device): the active account's card was salmon with grey and green text (unreadable) - the dark theme's *containers* are now dark tints with light text, secondary text is

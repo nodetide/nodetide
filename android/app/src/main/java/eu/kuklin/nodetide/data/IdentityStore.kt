@@ -11,9 +11,21 @@ import eu.kuklin.nodetide.crypto.KeySigner
 import eu.kuklin.nodetide.crypto.toHex
 import eu.kuklin.nodetide.protocol.Events
 import eu.kuklin.nodetide.crypto.SigningKeyPair
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -32,31 +44,58 @@ class IdentityStore(
     companion object {
         private val SEALED_KEY = stringPreferencesKey("accounts_v3")        // encrypted
         private val PLAIN_KEY = stringPreferencesKey("accounts_v2")         // an earlier development build kept it in clear
+        // Which account is active, kept next to the sealed book (a hash is public): switching accounts must not re-encrypt everything.
+        private val ACTIVE_KEY = stringPreferencesKey("active_account")
+        private const val TAG = "IdentityStore"
         private val OLD_KEYS = listOf(stringPreferencesKey("local_identity"), stringPreferencesKey("sigchain"))
     }
 
-    // Opening the book is an AES-GCM decryption with a hardware-backed key, and every screen collects the book: remember the
-    // last one that opened (never a failure: that may be temporary, say a locked phone) so the work is done once per change.
+    // Opening the book is an AES-GCM decryption with a hardware-backed key (StrongBox on many phones: one operation at a time and
+    // slow). It must happen once per change, off the main thread, and not once per screen: so there is ONE shared flow of the
+    // opened book, and the result is also remembered (never a failure: that may be temporary, say a locked phone).
     @Volatile private var opened: Pair<String, Loaded.Ok>? = null
 
     private fun load(prefs: Preferences): Loaded {
-        prefs[SEALED_KEY]?.let { sealed ->
-            opened?.takeIf { it.first == sealed }?.let { return it.second }
-            val result = SealedBook.open(sealed, box)
-            if (result is Loaded.Ok) opened = sealed to result
-            return result
+        val result: Loaded = prefs[SEALED_KEY]?.let { sealed ->
+            opened?.takeIf { it.first == sealed }?.second ?: run {
+                val started = System.nanoTime()
+                val r = SealedBook.open(sealed, box)
+                Log.d(TAG, "opened the accounts in ${(System.nanoTime() - started) / 1_000_000} ms (${sealed.length} characters)")
+                if (r is Loaded.Ok) opened = sealed to r
+                r
+            }
+        } ?: prefs[PLAIN_KEY]?.let { Loaded.Ok(AccountBook.decode(it)) }   // read until migrate() has sealed it
+          ?: Loaded.Ok(AccountBook())
+        // the active account is its own small setting: it wins over the one recorded inside the sealed book
+        val active = prefs[ACTIVE_KEY]
+        if (result is Loaded.Ok && active != null && active in result.book && result.book.active != active) {
+            return Loaded.Ok(result.book.copy(active = active))
         }
-        prefs[PLAIN_KEY]?.let { return Loaded.Ok(AccountBook.decode(it)) }   // read until migrate() has sealed it
-        return Loaded.Ok(AccountBook())
+        return result
     }
 
-    private val loaded: Flow<Loaded> = context.identityDataStore.data.map(::load)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** All accounts and the active one (empty while the stored data cannot be opened: see [problem]). */
-    val book: Flow<AccountBook> = loaded.map { (it as? Loaded.Ok)?.book ?: AccountBook() }
+    private val retry = MutableStateFlow(0)
+
+    /** Null until the stored data has been opened for the first time. */
+    private val loaded: StateFlow<Loaded?> = combine(context.identityDataStore.data, retry) { prefs, _ -> load(prefs) as Loaded? }
+        .flowOn(Dispatchers.Default)
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    /**
+     * Try again if the accounts could not be opened: the Keystore refuses while the phone is locked, which is not the same as the
+     * key being gone. Called when the app comes to the front; does nothing while they are open.
+     */
+    fun reopen() {
+        if (loaded.value is Loaded.Unreadable) retry.update { it + 1 }
+    }
+
+    /** All accounts and the active one (empty while the stored data cannot be opened: see [problem]). Emits once the data is open. */
+    val book: Flow<AccountBook> = loaded.filterNotNull().map { (it as? Loaded.Ok)?.book ?: AccountBook() }
 
     /** Why the stored accounts cannot be opened, or null. While set, nothing is written over them. */
-    val problem: Flow<String?> = loaded.map { (it as? Loaded.Unreadable)?.reason }
+    val problem: Flow<String?> = loaded.filterNotNull().map { (it as? Loaded.Unreadable)?.reason }
 
     val accounts: Flow<List<Account>> = book.map { it.accounts }
 
@@ -78,8 +117,12 @@ class IdentityStore(
             when (val now = load(prefs)) {
                 is Loaded.Unreadable -> throw Unreadable(now.reason)
                 is Loaded.Ok -> {
-                    prefs[SEALED_KEY] = SealedBook.seal(change(now.book), box)
+                    val changed = change(now.book)
+                    val started = System.nanoTime()
+                    prefs[SEALED_KEY] = SealedBook.seal(changed, box)
+                    Log.d(TAG, "sealed the accounts in ${(System.nanoTime() - started) / 1_000_000} ms")
                     prefs.remove(PLAIN_KEY)
+                    changed.current?.hash?.let { prefs[ACTIVE_KEY] = it } ?: prefs.remove(ACTIVE_KEY)
                 }
             }
         }
@@ -213,8 +256,13 @@ class IdentityStore(
         update { book -> (hash ?: book.current?.hash)?.let { book.withChain(it, events) } ?: book }
     }
 
-    /** Make another account the active one. */
-    suspend fun setActive(hash: String) = update { it.activate(hash) }
+    /** Make another account the active one. Only the small "active" setting is written: no encryption, so it is instant. */
+    suspend fun setActive(hash: String) {
+        context.identityDataStore.edit { prefs ->
+            val now = load(prefs)
+            if (now is Loaded.Ok && hash in now.book) prefs[ACTIVE_KEY] = hash
+        }
+    }
 
     /** Remove one account from this phone (its keys go with it). */
     suspend fun removeAccount(hash: String) = update { it.without(hash) }
@@ -226,6 +274,7 @@ class IdentityStore(
     suspend fun clearAll() = context.identityDataStore.edit { prefs ->
         prefs.remove(SEALED_KEY)
         prefs.remove(PLAIN_KEY)
+        prefs.remove(ACTIVE_KEY)
     }.let { }
 
     /** Get the active identity synchronously (for one-time reads). */

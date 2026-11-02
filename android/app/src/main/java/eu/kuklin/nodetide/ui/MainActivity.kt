@@ -23,6 +23,11 @@ import eu.kuklin.nodetide.ui.screens.*
 import eu.kuklin.nodetide.ui.theme.NodetideTheme
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        NodetideApp.instance.identityStore.reopen()      // accounts that could not be opened while the phone was locked
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
