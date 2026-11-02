@@ -322,7 +322,7 @@ private fun DiscoveredRelayCard(
                     text = "${relay.host}:${relay.port}",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.8f)
                 )
                 if (relay.properties.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -330,7 +330,7 @@ private fun DiscoveredRelayCard(
                         Text(
                             text = "$key: $value",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.8f)
                         )
                     }
                 }

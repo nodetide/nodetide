@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
 fun AccountsScreen(navController: NavController) {
     val scope = rememberCoroutineScope()
     val store = remember { NodetideApp.instance.identityStore }
-    val book by store.book.collectAsState(initial = eu.kuklin.nodetide.data.AccountBook())
+    val loadedBook by store.book.collectAsState(initial = null)      // null until the stored accounts have been opened
     val problem by store.problem.collectAsState(initial = null)
     var removing by remember { mutableStateOf<Account?>(null) }
     var discarding by remember { mutableStateOf(false) }
@@ -45,6 +45,7 @@ fun AccountsScreen(navController: NavController) {
         )
     }
 
+    val book = loadedBook
     removing?.let { account ->
         AlertDialog(
             onDismissRequest = { removing = null },
@@ -52,8 +53,11 @@ fun AccountsScreen(navController: NavController) {
             title = { Text("Remove ${account.identity.name ?: "this account"}?") },
             text = {
                 Text(
-                    if (account.watchOnly) "This stops following the identity on this phone."
-                    else "This deletes the account and its private keys from this phone. Without a backup or another device holding the keys, the identity cannot be used again. This cannot be undone."
+                    when {
+                        account.watchOnly -> "This stops following the identity on this phone."
+                        account.deviceOnly -> "This removes this phone's device keys. The identity and its other devices are not affected; to be sure this phone can no longer act for it, also revoke the device from the wallet that holds the master key."
+                        else -> "This deletes the account and its private keys from this phone. Without a backup or another device holding the keys, the identity cannot be used again. This cannot be undone."
+                    }
                 )
             },
             confirmButton = {
@@ -97,12 +101,19 @@ fun AccountsScreen(navController: NavController) {
             }
         }
 
-        if (book.accounts.isEmpty() && problem == null) {
+        if (book == null) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Opening your accounts…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else if (book.accounts.isEmpty() && problem == null) {
             item { Text("No accounts yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
 
-        items(book.accounts, key = { it.hash }) { account ->
-            val active = account.hash == book.current?.hash
+        items(book?.accounts.orEmpty(), key = { it.hash }) { account ->
+            val active = account.hash == book?.current?.hash
             Card(
                 modifier = Modifier.fillMaxWidth().clickable { scope.launch { store.setActive(account.hash) } },
                 colors = CardDefaults.cardColors(
@@ -117,10 +128,11 @@ fun AccountsScreen(navController: NavController) {
                             account.hash.take(24) + "...",
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = LocalContentColor.current.copy(alpha = 0.8f),      // follows the card, so it reads on either colour
                         )
                         val kind = when {
                             account.watchOnly -> "watch-only"
+                            account.deviceOnly -> "this phone is a device"
                             account.identity.isDevice -> "device"
                             else -> "your identity"
                         }
@@ -138,14 +150,19 @@ fun AccountsScreen(navController: NavController) {
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Button(onClick = { navController.navigate(Screen.CreateIdentity.route) }) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
-                    Text("New account")
+                    Text("New account", maxLines = 1)
                 }
-                OutlinedButton(onClick = { navController.navigate(Screen.AttachDevice.route) }) { Text("Attach device") }
-                OutlinedButton(onClick = { navController.navigate(Screen.ScanQR.route) }) { Text("Watch") }
+                OutlinedButton(onClick = { navController.navigate(Screen.AttachDevice.route) }) { Text("Add this phone as a device", maxLines = 1) }
+                OutlinedButton(onClick = { navController.navigate(Screen.ScanQR.route) }) { Text("Watch", maxLines = 1) }
             }
         }
     }

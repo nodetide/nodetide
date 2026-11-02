@@ -8,13 +8,13 @@ import androidx.compose.ui.graphics.Color
 private val DarkColorScheme = darkColorScheme(
     primary = Color(0xFFE94560),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFF6B6B),
-    onPrimaryContainer = Color.White,
+    primaryContainer = Color(0xFF6B1D31),            // a dark tint of the accent: light text on it is readable
+    onPrimaryContainer = Color(0xFFFFE3E8),
 
     secondary = Color(0xFF4ECCA3),
     onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF3DAA8A),
-    onSecondaryContainer = Color.Black,
+    secondaryContainer = Color(0xFF1B5E4E),
+    onSecondaryContainer = Color(0xFFDFFFF3),
 
     background = Color(0xFF1A1A2E),
     onBackground = Color(0xFFEAEAEA),
@@ -22,7 +22,7 @@ private val DarkColorScheme = darkColorScheme(
     surface = Color(0xFF16213E),
     onSurface = Color(0xFFEAEAEA),
     surfaceVariant = Color(0xFF0F3460),
-    onSurfaceVariant = Color(0xFFA0A0A0),
+    onSurfaceVariant = Color(0xFFC9C9D6),
 
     error = Color(0xFFFF4757),
     onError = Color.White,

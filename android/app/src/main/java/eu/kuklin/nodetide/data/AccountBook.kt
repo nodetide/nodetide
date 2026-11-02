@@ -10,8 +10,11 @@ import kotlinx.serialization.json.JsonObject
 data class Account(val identity: LocalIdentity, val chain: List<JsonObject> = emptyList()) {
     val hash: String get() = identity.identityHash
 
-    /** Watch-only: an identity followed by its public data, with no key here. */
-    val watchOnly: Boolean get() = identity.signingSecretKey.isEmpty()
+    /** Watch-only: an identity followed by its public data, with no key of any kind here (a paired device holds its device key). */
+    val watchOnly: Boolean get() = identity.signingSecretKey.isEmpty() && identity.deviceSigningSecretKey.isNullOrEmpty()
+
+    /** A device of an identity whose master key is elsewhere: it signs with its own device key only. */
+    val deviceOnly: Boolean get() = identity.signingSecretKey.isEmpty() && !identity.deviceSigningSecretKey.isNullOrEmpty()
 }
 
 /**

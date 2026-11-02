@@ -82,6 +82,20 @@ class AccountBookTest {
     }
 
     @Test
+    fun aPairedDeviceHoldsKeysSoItIsNotWatchOnly() {
+        // no master key here, but a device key the master authorized: the account acts, it does not just follow
+        val device = Account(identity("d", secret = "").copy(isDevice = true, deviceSigningSecretKey = "device-secret", deviceSigningPublicKey = "device-pub"))
+        assertFalse(device.watchOnly)
+        assertTrue(device.deviceOnly)
+        val master = account("m", "genesis")
+        assertFalse(master.watchOnly)
+        assertFalse(master.deviceOnly)
+        val watched = Account(identity("w", secret = ""))
+        assertTrue(watched.watchOnly)
+        assertFalse(watched.deviceOnly)
+    }
+
+    @Test
     fun unknownFieldsFromALaterVersionAreIgnored() {
         val text = Json.encodeToString(AccountBook.serializer(), AccountBook().with(account("a"))).replace("\"accounts\"", "\"future\":1,\"accounts\"")
         assertEquals("a", AccountBook.decode(text).current?.hash)

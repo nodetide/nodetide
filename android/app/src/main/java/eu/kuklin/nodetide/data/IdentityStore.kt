@@ -35,8 +35,17 @@ class IdentityStore(
         private val OLD_KEYS = listOf(stringPreferencesKey("local_identity"), stringPreferencesKey("sigchain"))
     }
 
+    // Opening the book is an AES-GCM decryption with a hardware-backed key, and every screen collects the book: remember the
+    // last one that opened (never a failure: that may be temporary, say a locked phone) so the work is done once per change.
+    @Volatile private var opened: Pair<String, Loaded.Ok>? = null
+
     private fun load(prefs: Preferences): Loaded {
-        prefs[SEALED_KEY]?.let { return SealedBook.open(it, box) }
+        prefs[SEALED_KEY]?.let { sealed ->
+            opened?.takeIf { it.first == sealed }?.let { return it.second }
+            val result = SealedBook.open(sealed, box)
+            if (result is Loaded.Ok) opened = sealed to result
+            return result
+        }
         prefs[PLAIN_KEY]?.let { return Loaded.Ok(AccountBook.decode(it)) }   // read until migrate() has sealed it
         return Loaded.Ok(AccountBook())
     }

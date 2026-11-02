@@ -17,16 +17,20 @@ object KeystoreKey {
     private const val ALIAS = "nodetide.accounts.v1"
     private const val PROVIDER = "AndroidKeyStore"
 
+    @Volatile private var cached: SecretKey? = null
+
+    /** The key handle is looked up once per process: asking the Keystore for it every time costs tens of milliseconds. */
     @Synchronized
     fun get(): SecretKey {
+        cached?.let { return it }
         val store = KeyStore.getInstance(PROVIDER).apply { load(null) }
-        (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        (store.getKey(ALIAS, null) as? SecretKey)?.let { cached = it; return it }
 
         var last: Exception? = null
         // (strongBox, unlockedOnly): strongest first
         for ((strongBox, unlockedOnly) in listOf(true to true, false to true, false to false)) {
             try {
-                return create(strongBox, unlockedOnly)
+                return create(strongBox, unlockedOnly).also { cached = it }
             } catch (e: StrongBoxUnavailableException) {
                 last = e
             } catch (e: Exception) {

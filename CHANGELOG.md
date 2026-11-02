@@ -3,6 +3,13 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (Android: the Accounts screen)
+
+- **Fixed on the phone** (found by the first real use of a paired device): the active account's card was salmon with grey and green text (unreadable) - the dark theme's *containers* are now dark tints with light text, secondary text is
+  a lighter grey, and card text follows its card; a paired device was labelled **"watch-only"** because it has no master key - it holds a device key, so it is now "this phone is a device" (and its removal warning says so); the three buttons at
+  the bottom overflowed the screen ("Watch" wrapped letter by letter) - they now wrap as a flow; and the screen was **slow to appear** because every collector of the account book decrypted it separately with a hardware-backed key (and looked the key up
+  again each time) - the key handle is cached, the last book that opened is remembered, and the screen shows "Opening your accounts…" instead of "No accounts yet." while it loads.
+
 ## 2026-11-02 (adding a phone by QR)
 
 - **Add a device by scanning a QR** (`pairing-qr.md`). Until now the phone's "scan QR to add a device" only understood its own watch-only format, the web client's Share QR was a different format, and no screen anywhere could start a real pairing.
