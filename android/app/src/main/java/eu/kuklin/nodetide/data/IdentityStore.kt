@@ -167,6 +167,38 @@ class IdentityStore(
         return identity
     }
 
+    /**
+     * This phone became a device of an identity whose master key lives elsewhere (pairing by QR). The account has no master key:
+     * only the device keys, which the master authorized on the chain.
+     */
+    suspend fun addPairedDevice(
+        identityHash: String,
+        name: String?,
+        masterPublicKey: String,
+        distributionPoints: List<String>,
+        chain: List<JsonObject>,
+        device: SigningKeyPair,
+        deviceEncryption: EncryptionKeyPair,
+    ): LocalIdentity {
+        val identity = LocalIdentity(
+            identityHash = identityHash,
+            name = name,
+            signingSecretKey = "",                    // no master key here
+            signingPublicKey = masterPublicKey,
+            encryptionSecretKey = null,
+            encryptionPublicKey = null,
+            distributionPoints = distributionPoints,
+            isDevice = true,
+            masterIdentityHash = identityHash,
+            deviceSigningSecretKey = device.secretKeyHex,
+            deviceSigningPublicKey = device.publicKeyHex,
+            deviceEncryptionSecretKey = deviceEncryption.secretKey.toHex(),
+            deviceEncryptionPublicKey = deviceEncryption.publicKeyHex,
+        )
+        update { it.with(Account(identity, chain), makeActive = true) }
+        return identity
+    }
+
     /** Update the cached sigchain of the active account (or of [hash]). */
     suspend fun updateSigchain(events: List<JsonObject>, hash: String? = null) {
         update { book -> (hash ?: book.current?.hash)?.let { book.withChain(it, events) } ?: book }

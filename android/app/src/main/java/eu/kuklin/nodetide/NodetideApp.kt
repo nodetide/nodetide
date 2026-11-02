@@ -6,6 +6,7 @@ import eu.kuklin.nodetide.data.SettingsStore
 import eu.kuklin.nodetide.discovery.RelayDiscoveryService
 import eu.kuklin.nodetide.network.ApiClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -20,6 +21,11 @@ class NodetideApp : Application() {
 
     lateinit var discoveryService: RelayDiscoveryService
         private set
+
+    /** The pairing being done now (a QR was scanned or an invite pasted); the pairing screen shows it. */
+    @Volatile var pairing: eu.kuklin.nodetide.data.PairingSession? = null
+    /** Work that must outlive a screen (turning the phone must not cancel a pairing). */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var apiClient: ApiClient? = null
     private var lastRelayUrl: String? = null

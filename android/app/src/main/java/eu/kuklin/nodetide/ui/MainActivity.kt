@@ -97,6 +97,7 @@ fun NodetideMainContent() {
             composable(Screen.CreateIdentity.route) { CreateIdentityScreen(navController) }
             composable(Screen.AttachDevice.route) { AttachDeviceScreen(navController) }
             composable(Screen.ScanQR.route) { ScanQRScreen(navController) }
+            composable(Screen.PairDevice.route) { PairDeviceScreen(navController) }
         }
     }
 }
@@ -113,6 +114,7 @@ sealed class Screen(val route: String, val label: String, val icon: androidx.com
     data object CreateIdentity : Screen("create_identity", "Create Identity", Icons.Default.Add)
     data object AttachDevice : Screen("attach_device", "Attach Device", Icons.Default.Link)
     data object ScanQR : Screen("scan_qr", "Scan QR", Icons.Default.QrCodeScanner)
+    data object PairDevice : Screen("pair_device", "Add this phone", Icons.Default.Link)
 
     companion object {
         val bottomNavItems: List<Screen> by lazy {

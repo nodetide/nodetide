@@ -3,6 +3,14 @@
 Progress notes kept between sessions. Newest first. Each entry says what changed, why, and what is
 still open, so a new session can pick up without re-deriving context.
 
+## 2026-11-02 (adding a phone by QR)
+
+- **Add a device by scanning a QR** (`pairing-qr.md`). Until now the phone's "scan QR to add a device" only understood its own watch-only format, the web client's Share QR was a different format, and no screen anywhere could start a real pairing.
+  Now the web client (My Identity > Devices & recovery > **Add a device**) shows an invitation QR (and the text to paste), the phone (Add device > Scan QR, or paste) shows the identity, node and its own key fingerprint, the owner compares fingerprints and confirms,
+  and the master key authorizes the phone as a device on the chain. The phone becomes a device only when the verified chain lists its key (it trusts no message), saving an account without a master key. Same node rendezvous as the hosted wallet's pairing, no server change.
+  The Share QR (web JSON or the old format) is accepted for watching, and the phone's own Show QR uses the web format. Tested with a simulated phone against a real node in headless Chrome, and the Kotlin rules against Python-computed values.
+  (The Android project now also builds locally with platform 37.)
+
 ## 2026-11-02 (publishing DNS records: nsupdate and acme.sh plugins)
 
 - **`nodetide identity dns-publish`** puts the identity's DNS records into the zone (`dns-publish.md`): by **RFC 2136 dynamic update** (`--method nsupdate`, TSIG key from a file or `NODETIDE_NSUPDATE_KEY`, never on a command line)

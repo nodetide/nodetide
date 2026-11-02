@@ -7,6 +7,9 @@ import eu.kuklin.nodetide.protocol.Lan
 import eu.kuklin.nodetide.protocol.Options
 import eu.kuklin.nodetide.protocol.Sigchain
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.long
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +72,47 @@ class ApiClient(private val baseUrl: String) {
                 if (!response.isSuccessful) return@withContext Result.failure(errorOf(response))
                 val body = response.body?.string() ?: throw Exception("Empty response")
                 Result.success(json.decodeFromString<SubmitEventResponse>(body))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Open a pairing slot on the node: the new device leaves its PUBLIC keys under the (hash of the) code it learned from the QR.
+     * Returns when the slot expires (seconds since the epoch).
+     */
+    suspend fun openPairing(slot: String, devicePubkey: String, deviceEncryptionPubkey: String, label: String): Result<Long> = withContext(Dispatchers.IO) {
+        try {
+            val body = JsonObject(mapOf(
+                "slot" to JsonPrimitive(slot),
+                "request" to JsonObject(mapOf(
+                    "device_pubkey" to JsonPrimitive(devicePubkey),
+                    "device_encryption_pubkey" to JsonPrimitive(deviceEncryptionPubkey),
+                    "label" to JsonPrimitive(label),
+                )),
+            )).toString().toRequestBody(jsonMediaType)
+            val request = Request.Builder().url("$baseUrl/api/pairing").post(body).build()
+            client.newCall(request).execute().use { response ->
+                if (response.code != 201) return@withContext Result.failure(errorOf(response))
+                val text = response.body?.string() ?: throw Exception("Empty response")
+                Result.success(Json.parseToJsonElement(text).jsonObject.getValue("expires_at").jsonPrimitive.long)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Is the pairing slot still there? (false once it has expired or was closed) */
+    suspend fun pairingOpen(slot: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url("$baseUrl/api/pairing/$slot").get().build()
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.code == 404 -> Result.success(false)
+                    response.isSuccessful -> Result.success(true)
+                    else -> Result.failure(errorOf(response))
+                }
             }
         } catch (e: Exception) {
             Result.failure(e)

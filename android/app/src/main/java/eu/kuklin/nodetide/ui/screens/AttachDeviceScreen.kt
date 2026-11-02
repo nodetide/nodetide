@@ -18,6 +18,7 @@ import androidx.navigation.NavController
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import eu.kuklin.nodetide.NodetideApp
+import eu.kuklin.nodetide.protocol.Share
 import eu.kuklin.nodetide.crypto.SigningKeyPair
 import eu.kuklin.nodetide.ui.Screen
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,10 @@ fun AttachDeviceScreen(navController: NavController) {
 
 @Composable
 private fun ScanQRTab(navController: NavController) {
+    val scope = rememberCoroutineScope()
+    var pasted by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -78,7 +83,7 @@ private fun ScanQRTab(navController: NavController) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Scan QR from another device",
+            text = "Add this phone as a device",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
@@ -86,7 +91,9 @@ private fun ScanQRTab(navController: NavController) {
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Use the QR code displayed on another device with your identity to attach this device.",
+            text = "On the web client open My Identity > Devices & recovery > Add a device, unlock the wallet and press \"Show a pairing QR code\". " +
+                "Scan that QR here. This phone gets its own keys; you confirm on the other screen that the fingerprints match.\n\n" +
+                "An identity's Share QR can be scanned too: it adds the identity to watch, without any keys.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -99,6 +106,26 @@ private fun ScanQRTab(navController: NavController) {
             Icon(Icons.Default.QrCodeScanner, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("Open Scanner")
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = pasted,
+            onValueChange = { pasted = it; problem = null },
+            label = { Text("Or paste the invite") },
+            placeholder = { Text("nodetide://pair?...") },
+            isError = problem != null,
+            supportingText = problem?.let { { Text(it) } },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            enabled = pasted.isNotBlank(),
+            onClick = { scope.launch { problem = handleScanned(pasted, navController) } }
+        ) {
+            Text("Use this invite")
         }
     }
 }
@@ -120,7 +147,7 @@ private fun ShowQRTab(navController: NavController) {
                     // Generate QR code with identity data for device attachment
                     // Format: nodetide:attach:identityHash:pubkey:encryptedSecretKey
                     // Note: In production, this should use secure key exchange
-                    val qrData = "nodetide:identity:${identity!!.identityHash}:${identity!!.signingPublicKey}"
+                    val qrData = Share.build(identity!!.identityHash, identity!!.signingPublicKey.ifBlank { null }, identity!!.distributionPoints)
                     qrBitmap = generateQRCode(qrData, 256)
                 } catch (e: Exception) {
                     // Handle error

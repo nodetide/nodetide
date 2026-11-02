@@ -1062,6 +1062,7 @@
               <div x-ref="scanContainer" x-show="scanning" class="mt-1 text-center"></div>
             </div>
           </div>
+
             <div class="card">
               <div class="card-header"><span class="card-title">At a glance</span></div>
               <div class="glance">
@@ -1209,6 +1210,42 @@
               <pre class="raw-json" x-text="JSON.stringify(activeDevices, null, 2)"></pre>
             </template>
           </div>
+          <div class="card" x-data="pairDeviceUI" x-show="$store.identity.activeHash" x-init="$watch('$store.wallet.unlocked', v => { if (!v) cancel() })">
+            <div class="card-header"><span class="card-title">Add a device</span></div>
+            <p class="text-small text-muted" x-show="step === 'idle'">
+              Add your phone (or another browser) as a device of this identity. It gets its own keys and never sees your master key. Show it a QR code, confirm that the fingerprint matches, and it can sign you in and add claims.
+            </p>
+            <p class="text-small" style="color: var(--warning, #b26a00)" x-show="step === 'idle' && !unlocked">Unlock the wallet above first: adding a device is signed with your master key.</p>
+            <p class="text-small" style="color: var(--danger, #c0392b)" x-show="error" x-text="error"></p>
+            <button type="button" class="btn" x-show="step === 'idle'" :disabled="!unlocked" @click="start()">Show a pairing QR code</button>
+
+            <div x-show="step === 'waiting'">
+              <p class="text-small">On the phone: <strong>Nodetide &gt; Add device &gt; Scan QR</strong>, then scan this code. It works for about ten minutes.</p>
+              <div class="text-center mb-1"><div x-ref="qr" style="display: inline-block; background: white; padding: 0.5rem; border-radius: 0.5rem"></div></div>
+              <div class="form-group">
+                  <label>Or send this invite to the device (paste it under Add device &gt; Scan QR)</label>
+                  <input type="text" readonly :value="invite" @focus="$event.target.select()" style="font-family: monospace; font-size: 0.75rem">
+                  <button type="button" class="btn btn-small btn-secondary" style="margin-top: 0.4rem" @click="navigator.clipboard.writeText(invite).then(() => $store.app.showSuccess('Invite copied'))">Copy invite</button>
+                  <small class="text-muted">Code <code x-text="shownCode"></code>. Anyone who has the invite while it is open could ask to be added, but nothing happens until you confirm the fingerprint here.</small>
+                </div>
+              <p class="text-small text-muted text-center">Waiting for the device...</p>
+              <div class="text-center"><button type="button" class="btn btn-small btn-secondary" @click="cancel()">Cancel</button></div>
+            </div>
+
+            <div x-show="step === 'confirm'">
+              <p><strong x-text="device && device.label"></strong> wants to become a device of this identity.</p>
+              <p>Its key fingerprint: <code x-text="fingerprint" style="font-size: 1.2rem"></code></p>
+              <p class="text-small text-muted">The same fingerprint must be shown on the device. It will be able to add claims, sign you in and see your claim values. Only continue if you started this yourself.</p>
+              <button type="button" class="btn" @click="approve()" :disabled="$store.app.loading">Add the device</button>
+              <button type="button" class="btn btn-secondary" @click="cancel()">Cancel</button>
+            </div>
+
+            <div x-show="step === 'done'">
+              <p>Done: <strong x-text="device && device.label"></strong> is a device of this identity. The phone picks it up in a moment.</p>
+              <button type="button" class="btn btn-small btn-secondary" @click="cancel()">Add another</button>
+            </div>
+          </div>
+
           <div class="card">
             <div class="card-header">
               <span class="card-title">Recovery</span>

@@ -1396,6 +1396,73 @@
     },
 
     // ---- verification service ----
+    // ---- pairing: add a device (a phone) by showing it a QR code ----
+    // The same node rendezvous the hosted wallet uses (pairing.py): a slot named by the hash of a secret code. Here the
+    // wallet that holds the master key makes the code and shows it as a QR; the new device scans it, opens the slot with its
+    // PUBLIC keys, and this wallet - after the owner confirms the fingerprint - authorizes it on the chain and leaves a sealed
+    // copy of the chain in the slot. The node relays two small messages and can read neither the code nor the answer.
+    PAIRING_ALPHABET: 'ABCDEFGHJKMNPQRSTUVWXYZ23456789',
+
+    pairingCode() {
+      const bytes = crypto.getRandomValues(new Uint8Array(10));
+      return [...bytes].map(b => this.PAIRING_ALPHABET[b % this.PAIRING_ALPHABET.length]).join('');
+    },
+
+    async pairingSlot(code) { return sha256('nodetide-pairing:' + code); },
+
+    async fingerprint(pubkeyHex) {
+      const d = (await sha256(decodeHex(pubkeyHex))).slice(0, 12);
+      return `${d.slice(0, 4)}-${d.slice(4, 8)}-${d.slice(8, 12)}`;
+    },
+
+    pairingInvite(hash, code) {
+      const q = new URLSearchParams({ c: code, n: location.origin, i: hash });
+      return `nodetide://pair?${q.toString()}`;
+    },
+
+    async pairingPoll(code) {
+      /** The device waiting under this code ({device_pubkey, device_encryption_pubkey, label}), or null while nobody has scanned. */
+      try {
+        const slot = await api.request('GET', `/pairing/${await this.pairingSlot(code)}`);
+        return slot.response ? { answered: true } : slot.request;
+      } catch (e) {
+        if (e.status === 404) return null;
+        throw e;
+      }
+    },
+
+    async pairingApprove(hash, code, device) {
+      /** Authorize the device on the chain, then leave the sealed answer. Returns the new chain's head. */
+      const s = this.session(hash);
+      if (!/^[0-9a-f]{64}$/.test(device.device_pubkey) || !/^[0-9a-f]{64}$/.test(device.device_encryption_pubkey)) throw new Error('The device sent malformed keys');
+      const label = String(device.label || '').trim().slice(0, 64);
+      if (!label) throw new Error('The device did not give itself a name');
+      const { head, commitment } = await this.chain(hash);
+      const event = {
+        version: 1, type: 'add_device', alg: 'ed25519', hash_alg: 'sha256', timestamp: Math.floor(Date.now() / 1000),
+        prev: head, signed_by: s.master.signing.publicKey, device_pubkey: device.device_pubkey,
+        device_encryption_pubkey: device.device_encryption_pubkey, label, capabilities: DEVICE_CAPABILITIES, expires: null,
+        ...(commitment ? { content: commitment } : {}),
+      };
+      event.signature = Crypto.sign(canonicalize(event), s.master.signing.secretKey);
+      await api.submitEvent(hash, event);
+
+      // the sealed answer: the whole chain (public anyway), boxed from this wallet's device key to the new device's key
+      const chain = await this.chain(hash);
+      const plain = new TextEncoder().encode(JSON.stringify({ sigchain: chain.all, claims: {}, attestations: [] }));
+      const nonce = nacl.randomBytes(24);
+      const box = nacl.box(plain, nonce, decodeHex(device.device_encryption_pubkey), decodeHex(s.device.encryption.secretKey));
+      const sealed = new Uint8Array(nonce.length + box.length);
+      sealed.set(nonce);
+      sealed.set(box, nonce.length);
+      let binary = '';
+      for (const b of sealed) binary += String.fromCharCode(b);
+      await api.request('PUT', `/pairing/${await this.pairingSlot(code)}/response`, {
+        response: { from_encryption_pubkey: s.device.encryption.publicKey, sealed: btoa(binary) },
+      });
+      return chain.head;
+    },
+
     async setDistribution(hash, points) {
       /** A set_distribution control event, signed by the master key. It follows the last CONTROL event and commits to the claims so far (sigchain-v2.md). */
       const s = this.session(hash);
@@ -2129,6 +2196,82 @@
     }));
 
     // Backup and recovery dialogs (opened from the banner)
+    // Add a device by QR: this wallet shows the code, the new device scans it, the owner confirms
+    Alpine.data('pairDeviceUI', () => ({
+      step: 'idle',          // idle -> waiting -> confirm -> done
+      code: '',
+      invite: '',
+      device: null,
+      fingerprint: '',
+      error: '',
+      timer: null,
+      deadline: 0,
+
+      get unlocked() { return Alpine.store('wallet').unlocked; },
+      get hash() { return Alpine.store('identity').activeHash; },
+      get shownCode() { return this.code ? `${this.code.slice(0, 5)}-${this.code.slice(5)}` : ''; },
+
+      async start() {
+        this.stop();
+        this.error = '';
+        try {
+          Wallet.session(this.hash);
+        } catch (e) { this.error = e.message; return; }
+        this.code = Wallet.pairingCode();
+        this.invite = Wallet.pairingInvite(this.hash, this.code);
+        this.step = 'waiting';
+        this.deadline = Date.now() + 10 * 60 * 1000;
+        await this.$nextTick();
+        const box = this.$refs.qr;
+        if (box && typeof QRCode !== 'undefined') {
+          box.innerHTML = '';
+          const canvas = document.createElement('canvas');
+          box.appendChild(canvas);
+          QRCode.toCanvas(canvas, this.invite, { width: 220, margin: 2, color: { dark: '#1a1a2e', light: '#ffffff' } });
+        }
+        this.timer = setInterval(() => this.poll(), 2000);
+      },
+
+      async poll() {
+        if (Date.now() > this.deadline) { this.stop(); this.error = 'The code expired. Start again for a new one.'; this.step = 'idle'; return; }
+        if (!this.unlocked) { this.stop(); this.step = 'idle'; return; }
+        try {
+          const waiting = await Wallet.pairingPoll(this.code);
+          if (waiting && !waiting.answered && this.step === 'waiting') {
+            this.device = waiting;
+            this.fingerprint = await Wallet.fingerprint(waiting.device_pubkey);
+            this.step = 'confirm';
+            clearInterval(this.timer);
+            this.timer = null;
+          }
+        } catch (e) { /* the node may be busy: try again at the next tick */ }
+      },
+
+      async approve() {
+        const app = Alpine.store('app');
+        app.loading = true;
+        try {
+          await Wallet.pairingApprove(this.hash, this.code, this.device);
+          this.step = 'done';
+          app.showSuccess(`${this.device.label} is now a device of your identity.`);
+          const detail = document.querySelector('[x-data=identityDetail]');
+          if (detail && window.Alpine) { const d = Alpine.$data(detail); d.lastLoadedHash = null; d.load(); }
+        } catch (e) {
+          this.error = 'Could not add the device: ' + e.message;
+          this.step = 'idle';
+        } finally {
+          app.loading = false;
+        }
+      },
+
+      stop() {
+        if (this.timer) clearInterval(this.timer);
+        this.timer = null;
+      },
+
+      cancel() { this.stop(); this.step = 'idle'; this.device = null; this.code = ''; this.invite = ''; },
+    }));
+
     // DNS state record: generated here, signed by the master key held in the unlocked wallet
     Alpine.data('stateRecordUI', () => ({
       format: 'zone',

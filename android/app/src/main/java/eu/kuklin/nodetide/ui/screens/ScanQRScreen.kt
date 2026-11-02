@@ -66,52 +66,13 @@ fun ScanQRScreen(navController: NavController) {
     fun processQRCode(data: String) {
         if (isProcessing) return
         isProcessing = true
-
         scope.launch {
             try {
-                // Parse QR data: nodetide:identity:hash:pubkey
-                val parts = data.split(":")
-                if (parts.size >= 4 && parts[0] == "nodetide" && parts[1] == "identity") {
-                    val identityHash = parts[2]
-                    val publicKey = parts[3]
-
-                    // For now, just save as a "watched" identity without secret key
-                    // Full device attachment would require secure key exchange
-                    val identity = LocalIdentity(
-                        identityHash = identityHash,
-                        name = null,
-                        signingPublicKey = publicKey,
-                        signingSecretKey = "", // No secret key - this is a watched identity
-                        encryptionSecretKey = null,
-                        encryptionPublicKey = null
-                    )
-
-                    // Try to get more info from relay
-                    val client = NodetideApp.instance.getApiClient()
-                    if (client != null) {
-                        val result = client.getIdentity(identityHash)
-                        result.onSuccess { response ->
-                            identityStore.saveIdentity(
-                                identity.copy(name = response.name)
-                            )
-                        }.onFailure {
-                            identityStore.saveIdentity(identity)
-                        }
-                    } else {
-                        identityStore.saveIdentity(identity)
-                    }
-
-                    navController.navigate(Screen.Identity.route) {
-                        popUpTo(Screen.Home.route)
-                    }
-                } else {
-                    error = "Invalid QR code format"
-                    isProcessing = false
-                }
+                error = handleScanned(data, navController)
             } catch (e: Exception) {
                 error = e.message ?: "Failed to process QR code"
-                isProcessing = false
             }
+            if (error != null) isProcessing = false
         }
     }
 
